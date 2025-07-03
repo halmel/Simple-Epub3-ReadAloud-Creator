@@ -1,8 +1,33 @@
-# Simple-Epub3-Realoud-Creator
-A simple tool for creating synced audio books with text books 
-Inspired by https://storyteller-platform.gitlab.io/storyteller/ and  https://github.com/r4victor/syncabook
-Goal of the project was to create a simpler more user acesible version of the storryteller app
-# Reading the synced book
-* [Thorium Reader](https://www.edrlab.org/software/thorium-reader/) (Windows, MacOS and Linux) – Great for testing
-* [Menestrello](https://github.com/readbeyond/menestrello) (iOS, Android) - Graet for reeading only one miner think is broken the audio plaback bar its also broken with storryteller made books ( dont know why )
-* [Storyteller Mobile App](https://storyteller-platform.gitlab.io/storyteller/docs/reading-your-books/storyteller-apps) (iOS, Android) - Can manualy inport proccesed books, good for rreading
+# Simple EPUB3 Read-Aloud Creator
+
+A simple tool for creating synchronized audio books from text books.
+
+Inspired by:
+- [Storyteller Platform](https://storyteller-platform.gitlab.io/storyteller/)
+- [syncabook by r4victor](https://github.com/r4victor/syncabook)
+
+The goal of this project is to create a simpler, more user-friendly alternative to the Storyteller app.
+
+---
+
+## 📖 Reading the Synced Book
+
+You can use the following apps to read the EPUB3 books with synced audio:
+
+### ✅ [Thorium Reader](https://www.edrlab.org/software/thorium-reader/)  
+**Platforms:** Windows, macOS, Linux  
+Great for testing read-aloud EPUB3 books.
+
+---
+
+### ✅ [Menestrello](https://github.com/readbeyond/menestrello)  
+**Platforms:** iOS, Android  
+Good for reading. One minor issue: the audio playback bar is broken — this happens even with books made using Storyteller, so the cause is currently unknown.
+
+---
+
+### ✅ [Storyteller Mobile App](https://storyteller-platform.gitlab.io/storyteller/docs/reading-your-books/storyteller-apps)  
+**Platforms:** iOS, Android  
+Supports manual import of processed books. A solid option for read-aloud EPUBs.
+
+---
