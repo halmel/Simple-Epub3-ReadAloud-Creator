@@ -23,12 +23,12 @@ namespace Readaloud_Epub3_Creator
                 var exeDir = AppDomain.CurrentDomain.BaseDirectory;
 
                 // Try Ebooks folder sibling to LatestRelease (Release run)
-                var candidatePath = Path.GetFullPath(Path.Combine(exeDir, @"..\..\Ebooks"));
+                var candidatePath = Path.GetFullPath(Path.Combine(exeDir, @"..\..\..\Ebooks"));
                 if (Directory.Exists(candidatePath))
                     return candidatePath;
 
                 // Try Ebooks folder from Debug/Release build output folder (YourProjectFolder\bin\Debug\netX)
-                candidatePath = Path.GetFullPath(Path.Combine(exeDir, @"..\..\..\..\..\Ebooks"));
+                candidatePath = Path.GetFullPath(Path.Combine(exeDir, @"..\..\..\..\..\..\Ebooks"));
                 if (Directory.Exists(candidatePath))
                     return candidatePath;
 
