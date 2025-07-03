@@ -58,7 +58,15 @@ namespace Readaloud_Epub3_Creator
                 );
 
                 Console.WriteLine(transcriptionOutput);
+                if (File.Exists(jsonFilePath))
+                {
+
                 y = File.ReadAllText(jsonFilePath);
+                }
+                else
+                {
+                    return;
+                }
             }
 
             List<Root> transcript = JsonConvert.DeserializeObject<List<Root>>(y);

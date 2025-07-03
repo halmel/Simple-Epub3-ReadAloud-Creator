@@ -368,16 +368,20 @@ FodyWeavers.xsd
 
 /Ebooks/*
 /Ebooks2/
-# Ignore everything in the Transcriber/venv folder...
-Transcriber/venv/**
 
-# ...except minimal embedded Python launcher files
-!Transcriber/venv/Scripts/
-!Transcriber/venv/Scripts/python.exe
-!Transcriber/venv/Scripts/pythonw.exe
+# Ignore everything in the venv folder...
+Transcriber/venv/*
+
+# ...but not these specific files/folders:
 !Transcriber/venv/pyvenv.cfg
-!Transcriber/venv/include/
+!Transcriber/venv/Scripts/
+!Transcriber/venv/bin/
+!Transcriber/venv/Include/
+!Transcriber/venv/python.exe
+!Transcriber/venv/pythonw.exe
 
+# Optional: Exclude __pycache__ inside venv
+Transcriber/venv/**/__pycache__/
 # Optional: for Unix compatibility (macOS/Linux)
 #!Transcriber/venv/bin/
 #!Transcriber/venv/bin/python

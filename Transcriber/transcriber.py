@@ -1,36 +1,76 @@
+
+def safe_print(*args, **kwargs):
+    safe_args = []
+    for a in args:
+        if isinstance(a, str):
+            safe_args.append(a.encode('ascii', errors='ignore').decode())
+        else:
+            safe_args.append(a)
+        print(*safe_args, **kwargs)
+
 import os
 import sys
 import json
+import subprocess
+def ensure_dependencies():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    req_path = os.path.join(script_dir, "requirements.txt")
+
+
+    # Then install all requirements including torch from requirements.txt
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-r", req_path],
+            check=True
+        )
+        safe_print(f"✓ Installed dependencies from {req_path}")
+    except subprocess.CalledProcessError as e:
+        safe_print(f"X Failed to install dependencies from {req_path}")
+        safe_print(e)
+        sys.exit(1)
+
+ensure_dependencies()
 import whisper
 import torch
 from pydub.utils import mediainfo
 from pathlib import Path
-import subprocess
 import multiprocessing
+
+import sys
+import io
+import ctypes
+import os
+
+if sys.platform == "win32":
+    ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
+
 
 
 def debug_cuda():
-    print("🛠 CUDA Debugging Info:")
+    safe_print("🛠 CUDA Debugging Info:")
     try:
-        print(f" - torch.cuda.is_available(): {torch.cuda.is_available()}")
-        print(f" - torch.version.cuda: {torch.version.cuda}")
-        print(f" - torch.backends.cudnn.version(): {torch.backends.cudnn.version()}")
-        print(f" - torch.cuda.device_count(): {torch.cuda.device_count()}")
+        safe_print(f" - torch.cuda.is_available(): {torch.cuda.is_available()}")
+        safe_print(f" - torch.version.cuda: {torch.version.cuda}")
+        safe_print(f" - torch.backends.cudnn.version(): {torch.backends.cudnn.version()}")
+        safe_print(f" - torch.cuda.device_count(): {torch.cuda.device_count()}")
         if torch.cuda.is_available():
-            print(f" - torch.cuda.get_device_name(): {torch.cuda.get_device_name(0)}")
+            safe_print(f" - torch.cuda.get_device_name(): {torch.cuda.get_device_name(0)}")
     except Exception as e:
-        print(f" - Error accessing torch.cuda: {e}")
+        safe_print(f" - Error accessing torch.cuda: {e}")
 
     try:
         result = subprocess.run(["nvidia-smi"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         if result.returncode == 0:
-            print(" - ✅ nvidia-smi output:\n" + result.stdout)
+            safe_print(" - V nvidia-smi output:\n" + result.stdout)
         else:
-            print(" - ❌ nvidia-smi error:\n" + result.stderr)
+            safe_print(" - X nvidia-smi error:\n" + result.stderr)
     except FileNotFoundError:
-        print(" - ❌ nvidia-smi not found. Ensure NVIDIA drivers are installed and in PATH.")
+        safe_print(" - X nvidia-smi not found. Ensure NVIDIA drivers are installed and in PATH.")
     except Exception as e:
-        print(f" - Unexpected error running nvidia-smi: {e}")
+        safe_print(f" - Unexpected error running nvidia-smi: {e}")
 
 
 def get_mp3_length(filepath):
@@ -85,12 +125,12 @@ def transcribe_files_multicore(mp3_paths, output_path, num_workers):
         for idx, result in enumerate(pool.imap_unordered(transcribe_cpu, mp3_paths), 1):
             transcriptions.append(result)
             percent = int(idx * 100 / total)
-            print(f"PROGRESS:{percent}", flush=True)
+            safe_print(f"PROGRESS:{percent}", flush=True)
 
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(transcriptions, f, indent=2, ensure_ascii=False)
 
-    print(f"✅ Transcription complete. Output written to {output_path}")
+    safe_print(f"V Transcription complete. Output written to {output_path}")
 
 
 def transcribe_files(mp3_paths, device_option, output_path, num_workers):
@@ -99,11 +139,11 @@ def transcribe_files(mp3_paths, device_option, output_path, num_workers):
     else:
         device = device_option
         if device == "cuda" and not torch.cuda.is_available():
-            print("❌ CUDA was requested but is not available. Starting diagnostics...")
+            safe_print("X CUDA was requested but is not available. Starting diagnostics...")
             debug_cuda()
             raise RuntimeError("CUDA requested but not available.")
 
-    print(f"Using device: {device}")
+    safe_print(f"Using device: {device}")
 
     if device == "cpu" and len(mp3_paths) > 1:
         transcribe_files_multicore(mp3_paths, output_path, num_workers)
@@ -115,7 +155,7 @@ def transcribe_files(mp3_paths, device_option, output_path, num_workers):
 
     total = len(mp3_paths)
     for idx, path in enumerate(mp3_paths):
-        print(f"Transcribing: {os.path.basename(path)}")
+        safe_print(f"Transcribing: {os.path.basename(path)}")
 
         audio = whisper.load_audio(path)
         audio = whisper.pad_or_trim(audio)
@@ -146,12 +186,12 @@ def transcribe_files(mp3_paths, device_option, output_path, num_workers):
         })
 
         percent = int((idx + 1) * 100 / total)
-        print(f"PROGRESS:{percent}", flush=True)
+        safe_print(f"PROGRESS:{percent}", flush=True)
 
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(transcriptions, f, indent=2, ensure_ascii=False)
 
-    print(f"✅ Transcription complete. Output written to {output_path}")
+    safe_print(f"V Transcription complete. Output written to {output_path}")
 
 
 def main():
@@ -178,14 +218,14 @@ def main():
 
     for f in mp3_files:
         if not Path(f).is_file():
-            print(f"❌ Error: '{f}' does not exist.")
+            safe_print(f"X Error: '{f}' does not exist.")
             sys.exit(1)
 
     try:
         transcribe_files(mp3_files, device_option, output_path, num_workers)
     except Exception as e:
         # Removed emoji here to avoid encoding issues on Windows
-        print("Transcription failed:", str(e))
+        safe_print("Transcription failed:", str(e))
         sys.exit(1)
 
 
