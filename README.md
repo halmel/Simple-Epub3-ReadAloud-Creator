@@ -7,8 +7,8 @@
 ---
 
 ## 🧰 Requirements
-
-- ✅ [.NET 9 SDK](https://dotnet.microsoft.com/en-us/download/dotnet/9.0)
+- ✅ [.NET Desktop Runtime 9](https://dotnet.microsoft.com/download/dotnet/9.0/runtime-desktop)  
+  (Required to **run** the WPF application) :contentReference[oaicite:1]{index=1}
 - ✅ [Python 3.8+](https://www.python.org/downloads/)
 - ✅ (Optional) CUDA-compatible GPU with [CUDA Toolkit & Drivers](https://developer.nvidia.com/cuda-downloads) for accelerated transcription (if using Whisper with GPU support)
 
