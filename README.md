@@ -1,5 +1,7 @@
 # Simple EPUB3 Read-Aloud Creator
 
+## Right Now in Alpha try at own risk
+
 A simple tool for creating synchronized audio books from text books.
 
 Inspired by:
