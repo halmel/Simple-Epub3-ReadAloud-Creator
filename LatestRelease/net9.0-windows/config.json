@@ -1,7 +1,0 @@
-{
-  "EbooksPath": "C:\\Users\\TIGO\\source\\repos\\halmel\\epub-to-epub3\\Ebooks",
-  "TranscriberPath": "C:\\Users\\TIGO\\source\\repos\\halmel\\epub-to-epub3\\Transcriber\\transcriber.py",
-  "Device": "cuda",
-  "MaxConcurrentTranscriptions": 3,
-  "ShowDebugOptions": true
-}
