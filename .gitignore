@@ -374,11 +374,8 @@ Transcriber/venv/*
 
 # ...but not these specific files/folders:
 !Transcriber/venv/pyvenv.cfg
-!Transcriber/venv/Scripts/
-!Transcriber/venv/bin/
+!Transcriber/venv/Scripts/*
 !Transcriber/venv/Include/
-!Transcriber/venv/python.exe
-!Transcriber/venv/pythonw.exe
 
 # Optional: Exclude __pycache__ inside venv
 Transcriber/venv/**/__pycache__/
