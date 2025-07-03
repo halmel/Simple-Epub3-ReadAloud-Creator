@@ -59,19 +59,50 @@ namespace Readaloud_Epub3_Creator
             return result;
         }
         public static string RunTranscription(
-            string venvPath,
-            string scriptPath,
-            string[] mp3Files,
-            string device,
-            string outputPath,
-            int workers = 2,
-            Action<int>? onProgress = null // optional progress callback
-        )
+        string venvPath,
+        string scriptPath,
+        string[] mp3Files,
+        string device,
+        string outputPath,
+        int workers = 2,
+        Action<int>? onProgress = null
+    )
         {
-            string pythonExe = Path.Combine(venvPath, "Scripts", "python.exe"); // Windows
-            if (!File.Exists(pythonExe))
-                throw new FileNotFoundException($"Python interpreter not found in venv: {pythonExe}");
+            string pythonExe = Path.Combine(venvPath, "Scripts", "python.exe"); // Windows venv
 
+            // If the venv doesn't exist, try to create it in the parent directory
+            if (!File.Exists(pythonExe))
+            {
+                Console.WriteLine("Virtual environment not found. Attempting to create...");
+
+                string parentDir = Path.GetFullPath(Path.Combine(venvPath, ".."));
+                string newVenvPath = Path.Combine(parentDir, "venv");
+                string newPythonExe = Path.Combine(newVenvPath, "Scripts", "python.exe");
+
+                var createVenv = new Process
+                {
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = "python", // system python
+                        Arguments = $"-m venv \"{newVenvPath}\"",
+                        UseShellExecute = false,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        CreateNoWindow = true
+                    }
+                };
+
+                createVenv.Start();
+                createVenv.WaitForExit();
+
+                if (!File.Exists(newPythonExe))
+                    throw new Exception("Failed to create virtual environment.");
+
+                venvPath = newVenvPath;
+                pythonExe = newPythonExe;
+            }
+
+            // Proceed to run the Python script
             string quotedMp3s = string.Join(" ", mp3Files.Select(f => $"\"{f}\""));
             string args = $"\"{scriptPath}\" {quotedMp3s} --device {device} --output \"{outputPath}\" --workers {workers}";
 
@@ -94,12 +125,9 @@ namespace Readaloud_Epub3_Creator
             {
                 if (e.Data != null)
                 {
-                    if (e.Data.StartsWith("PROGRESS:"))
+                    if (e.Data.StartsWith("PROGRESS:") && int.TryParse(e.Data.Replace("PROGRESS:", ""), out int percent))
                     {
-                        if (int.TryParse(e.Data.Replace("PROGRESS:", ""), out int percent))
-                        {
-                            onProgress?.Invoke(percent); // update UI or log
-                        }
+                        onProgress?.Invoke(percent);
                     }
                     else
                     {
@@ -123,6 +151,7 @@ namespace Readaloud_Epub3_Creator
 
             return string.Join(Environment.NewLine, output);
         }
+
 
 
 

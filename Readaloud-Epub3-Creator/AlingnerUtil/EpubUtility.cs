@@ -87,7 +87,12 @@ namespace Readaloud_Epub3_Creator
                 // STEP 2: Replace HTML files
                 foreach (var kvp in updatedHtmlDocs)
                 {
-                    string htmlPath = Directory.GetFiles(tempDir, kvp.Key, SearchOption.AllDirectories).FirstOrDefault();
+                    string fileNameOnly = Path.GetFileName(kvp.Key);
+                    // Recursively search for file by name only, case-insensitive
+                    string htmlPath = Directory
+                        .EnumerateFiles(tempDir, "*", SearchOption.AllDirectories)
+                        .FirstOrDefault(f => string.Equals(Path.GetFileName(f), fileNameOnly, StringComparison.OrdinalIgnoreCase));
+
                     if (htmlPath != null)
                     {
                         using (var sw = new StringWriter())
