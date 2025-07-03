@@ -6,6 +6,8 @@ using ModernWpf.Controls;
 using Microsoft.Win32;
 using System.Windows.Controls;
 using System.Runtime;
+using System.Windows.Forms;
+
 
 namespace Readaloud_Epub3_Creator
 {
@@ -74,17 +76,45 @@ namespace Readaloud_Epub3_Creator
 
         private void Save_Click(object sender, RoutedEventArgs e)
         {
+            // Save settings
             _settings.EbooksPath = PathTextBox.Text;
             _settings.Device = DeviceComboBox.Text;
             _settings.MaxConcurrentTranscriptions = (int)MaxConcurrentNumberBox.Value;
             _settings.TranscriberPath = TranscriberPathTextBox.Text;
             _settingsProvider.Save();
 
-            MessageBox.Show("Settings saved. Please restart the app for changes to apply.", "Saved",
-                MessageBoxButton.OK, MessageBoxImage.Information);
+            // Prompt user to restart
+            var result = MessageBox.Show(
+                "Settings saved. Do you want to restart the app now to apply changes?",
+                "Restart Application",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question
+            );
 
-            Close();
+            if (result == MessageBoxResult.Yes)
+            {
+                RestartApplication();
+            }
+            else
+            {
+                // Close the settings window
+                Close();
+            }
         }
+        private void RestartApplication()
+        {
+            // Get the path to the executable
+            string exePath = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName;
+
+            // Start a new instance of the application
+            System.Diagnostics.Process.Start(exePath);
+
+            // Close the current application
+            Application.Current.Shutdown();
+        }
+
+
+
 
         private void Cancel_Click(object sender, RoutedEventArgs e)
         {

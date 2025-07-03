@@ -81,6 +81,7 @@ namespace Readaloud_Epub3_Creator
             groups = new BookgroupList(_settings, GroupTabs);
             this.DataContext = groups;
 
+
         }
 
         private void GroupTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
