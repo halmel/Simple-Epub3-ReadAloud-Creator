@@ -5,15 +5,6 @@ VisualStudioVersion = 17.12.35521.163
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Readaloud-Epub3-Creator", "Readaloud-Epub3-Creator\Readaloud-Epub3-Creator.csproj", "{263CB8E3-8E2F-4AEA-8670-6E1F83B5CA67}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{1442B31F-906F-4722-9D20-DC947E6A64DD}"
-	ProjectSection(SolutionItems) = preProject
-		Transcriber\readme.txt = Transcriber\readme.txt
-		Transcriber\transcriber.py = Transcriber\transcriber.py
-		Transcriber\transcriber.spec = Transcriber\transcriber.spec
-		Transcriber\transcriptions - Copy.json = Transcriber\transcriptions - Copy.json
-		Transcriber\transcriptions.json = Transcriber\transcriptions.json
-	EndProjectSection
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
