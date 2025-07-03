@@ -370,4 +370,4 @@ FodyWeavers.xsd
 /Ebooks2/
 
 # Ignore everything in the venv folder...
-Transcriber/venv/Lib/*
+Transcriber/venv
