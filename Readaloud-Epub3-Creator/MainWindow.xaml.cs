@@ -2,6 +2,7 @@
 using FuzzySharp;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Win32;
+using Newtonsoft.Json;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
@@ -211,6 +212,17 @@ namespace Readaloud_Epub3_Creator
             }
         }
 
+        private void Save_Groups_Json(object sender, RoutedEventArgs e)
+        {
+
+            string json = JsonConvert.SerializeObject(groups, Formatting.Indented,
+                new JsonSerializerSettings { PreserveReferencesHandling = PreserveReferencesHandling.Objects });
+
+            string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "DesignTimePreviewData.json");
+            File.WriteAllText(path, json);
+
+            MessageBox.Show("Design-time preview data saved to:\n" + path);
+        }
 
 
         private void ImportFromFolder_Click(object sender, RoutedEventArgs e)

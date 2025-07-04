@@ -57,20 +57,23 @@ namespace Readaloud_Epub3_Creator
         }
         private void DeleteSettings_Click(object sender, RoutedEventArgs e)
         {
-            var result = MessageBox.Show("Are you sure you want to delete all settings and restore defaults?",
-                "Confirm Delete", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            var result = MessageBox.Show(
+                "Are you sure you want to delete all settings and restore defaults?",
+                "Confirm Delete",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
 
             if (result == MessageBoxResult.Yes)
             {
                 _settingsProvider.DeleteSettingsFile();
-                _settingsProvider.Reload(); // in case you want to keep using it in the same session
 
-                MessageBox.Show("Settings deleted. Please restart the app to load defaults.", "Deleted",
+                MessageBox.Show("Settings deleted. The application will now restart.", "Deleted",
                     MessageBoxButton.OK, MessageBoxImage.Information);
 
-                Close();
+                RestartApplication();
             }
         }
+
 
 
 

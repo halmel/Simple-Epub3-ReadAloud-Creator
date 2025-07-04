@@ -4,8 +4,11 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:ui="http://schemas.modernwpf.com/2019"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:local="clr-namespace:Readaloud_Epub3_Creator"
-        Title="Ebook Editor" Height="1000" Width="1200"
+
+
+
+    xmlns:local="clr-namespace:Readaloud_Epub3_Creator"
+        Title="Simple Epub3 ReadAloud Creator" Height="1000" Width="1200"
         Background="#f5f5f5">
     <Window.Resources>
         <local:SafeImageConverter x:Key="SafeImageConverter"/>
@@ -15,127 +18,158 @@
     <DockPanel>
 
 
-        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Background="#eee" Margin="0,0,0,0">
-            <Button Content="Settings" Width="100" Height="30" Click="Settings_Click" Margin="10,10,0,10" />
-            <Button Content="Show/Hide Console" Width="140" Height="30" Click="ToggleConsole_Click" Margin="10,10,0,10" />
-        </StackPanel>
-
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Background="#eee">
-            <Button Content="Create New Group" Width="150" Height="30" Margin="10,10,0,10" Click="CreateGroup_Click" />
-            <Button Content="Delete Current Group" Width="160" Height="30" Margin="10,10,0,10" Click="DeleteGroup_Click" />
-            <Button Content="Create New Book" Width="150" Height="30" Margin="10,10,0,10" Click="CreateBook_Click" />
-            <Button Content="Import from Folder" Width="150" Height="30" Margin="10,10,0,10" Click="ImportFromFolder_Click" />
+            <ui:CommandBar Margin="10,10,0,10">
 
+                <!-- General -->
+                <ui:AppBarButton Label="Settings" Icon="Setting" Click="Settings_Click"
+                         ToolTipService.ToolTip="Open Settings"/>
+                <ui:AppBarButton Label="Console" Icon="View" Click="ToggleConsole_Click"
+                         ToolTipService.ToolTip="Show or Hide Console"/>
+                <ui:AppBarSeparator/>
+
+                <!-- Group Actions -->
+                <ui:AppBarButton Label="New Group" Icon="Add" Click="CreateGroup_Click"
+                         ToolTipService.ToolTip="Create New Group"/>
+                <ui:AppBarButton Label="Del Group" Icon="Delete" Click="DeleteGroup_Click"
+                         ToolTipService.ToolTip="Delete Current Group"/>
+                <ui:AppBarSeparator/>
+
+                <!-- Add Book -->
+                <ui:AppBarButton Label="New Book" Icon="Page" Click="CreateBook_Click"
+                         ToolTipService.ToolTip="Create New Book"/>
+                <ui:AppBarButton Label="Import" Icon="OpenFile" Click="ImportFromFolder_Click"
+                         ToolTipService.ToolTip="Import Books from Folder"/>
+                <ui:AppBarSeparator/>
+
+                <!-- Select Books -->
+                <ui:AppBarButton Label="Select All" Icon="SelectAll" Click="ToggleSelectAll_Click"
+                         ToolTipService.ToolTip="Select All Books"/>
+                <ui:AppBarButton Label="Unprocessed" Icon="List" Click="SelectAllUnprocessed_Click"
+                         ToolTipService.ToolTip="Select All Unprocessed Books"/>
+                <ui:AppBarSeparator/>
+
+                <!-- Selected Actions -->
+                <ui:AppBarButton Label="Align" Icon="AlignRight" Click="AlignAllSelected_Click"
+                         ToolTipService.ToolTip="Align All Selected Books"/>
+                <ui:AppBarButton Label="Move" Icon="Forward" Click="MoveSelectedBooks_Click"
+                         ToolTipService.ToolTip="Move Selected Books to Group"/>
+                <ui:AppBarButton Label="Delete" Icon="Delete" Click="DeleteSelectedBooks_Click"
+                         ToolTipService.ToolTip="Delete Selected Books"/>
+            </ui:CommandBar>
         </StackPanel>
 
-        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Background="#eee" Margin="0,0,0,0">
-            <Button Content="Select All" Click="ToggleSelectAll_Click" Margin="10,10,0,10" />
-            <Button Content="Select All Unprocessed" Width="160" Height="30" Margin="10,10,0,10" Click="SelectAllUnprocessed_Click"/>
-            <Button Content="Align All Selected" Width="160" Height="30" Margin="10,10,0,10" Click="AlignAllSelected_Click"/>
-            <Button Content="Delete Selected Books" Width="160" Height="30" Margin="10,10,0,10" Click="DeleteSelectedBooks_Click"/>
-            <Button Content="Move All Selected to Group" Width="190" Height="30" Margin="10,10,0,10" Click="MoveSelectedBooks_Click"/>
-        </StackPanel>
 
 
 
-        <StackPanel>
-            <TabControl x:Name="GroupTabs" ItemsSource="{Binding Tabs}" SelectedItem="{Binding CurrentGroup, Mode=TwoWay}">
-            <TabControl.ItemTemplate>
-                <DataTemplate>
-                    <TextBlock Text="{Binding Name}" />
-                </DataTemplate>
-            </TabControl.ItemTemplate>
+        <!-- Main Content Area -->
+        <Grid DockPanel.Dock="Top">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <!-- TabControl will fill this row -->
+            </Grid.RowDefinitions>
 
-            <TabControl.ContentTemplate>
-                <DataTemplate>
-                    <ScrollViewer VerticalScrollBarVisibility="Visible" MaxWidth="1000" MaxHeight="1000"  HorizontalAlignment="Left"  >
-                        <ItemsControl ItemsSource="{Binding Books}" Margin="10">
-                            <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <Border x:Name="BookBorder"
-            BorderBrush="#ccc" BorderThickness="1" Padding="10" Margin="0,0,0,10" CornerRadius="8" Background="White">
-                                            <Grid >
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="Auto"/>
-                                                    <ColumnDefinition Width="*" />
-                                                </Grid.ColumnDefinitions>
+            <TabControl Grid.Row="0" x:Name="GroupTabs" ItemsSource="{Binding Tabs}" SelectedItem="{Binding CurrentGroup, Mode=TwoWay}">
+                <TabControl.ItemTemplate>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding Name}" />
+                    </DataTemplate>
+                </TabControl.ItemTemplate>
 
-                                                <!-- Book Cover -->
-                                                <Image Grid.Column="0"
-                   Source="{Binding CoverPath, Converter={StaticResource SafeImageConverter}}"
-                   Height="300"
-                   Stretch="Uniform"
-                   Margin="0,0,10,0"
-                   VerticalAlignment="Top"
-                   HorizontalAlignment="Left"/>
+                <TabControl.ContentTemplate>
+                    <DataTemplate>
+                        <!-- Allow both vertical and horizontal scrolling -->
+                        <ScrollViewer VerticalScrollBarVisibility="Visible"
+                      HorizontalScrollBarVisibility="Auto"
+                      HorizontalAlignment="Stretch"
+                      VerticalAlignment="Stretch">
 
-                                                <Grid Grid.Column="1">
-                                                    <!-- Using a Grid to position checkbox top-right and content below -->
-                                                    <Grid.RowDefinitions>
-                                                        <RowDefinition Height="Auto"/>
-                                                        <!-- Checkbox row -->
-                                                        <RowDefinition Height="*"/>
-                                                        <!-- Content row -->
-                                                        <RowDefinition Height="Auto"/>
+                            <!-- Container to center the content and limit its max width -->
+                            <Grid HorizontalAlignment="Center" MaxWidth="1000" Margin="10">
+                                <ItemsControl ItemsSource="{Binding Books}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border x:Name="BookBorder"
+                                    BorderBrush="#ccc" BorderThickness="1"
+                                    Padding="10" Margin="0,0,0,10"
+                                    CornerRadius="8" Background="White">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+
+                                                    <!-- Book Cover -->
+                                                    <Image Grid.Column="0"
+                                           Source="{Binding CoverPath, Converter={StaticResource SafeImageConverter}}"
+                                           Height="300"
+                                           Stretch="Uniform"
+                                           Margin="0,0,10,0"
+                                           VerticalAlignment="Top"
+                                           HorizontalAlignment="Left"/>
+
+                                                    <Grid Grid.Column="1">
+                                                        <Grid.RowDefinitions>
+                                                            <RowDefinition Height="Auto"/>
+                                                            <RowDefinition Height="*"/>
+                                                            <RowDefinition Height="Auto"/>
+                                                        </Grid.RowDefinitions>
+
+                                                        <!-- Checkbox top-right -->
+                                                        <CheckBox IsChecked="{Binding IsSelected}" Content="Select" 
+                                                  HorizontalAlignment="Right" Margin="0,0,0,5" Grid.Row="0"/>
+
+                                                        <!-- Main content -->
+                                                        <StackPanel Grid.Row="1" Margin="0,10,0,0">
+                                                            <TextBlock Text="{Binding Title}" FontWeight="Bold" FontSize="16"/>
+                                                            <TextBlock Text="{Binding StatusText}" FontStyle="Italic" FontSize="12" Foreground="Gray" Margin="0,2,0,0"/>
+                                                            <TextBlock Text="EPUB File:" FontWeight="SemiBold" Margin="0,10,0,0"/>
+                                                            <TextBlock Text="{Binding EpubFileName}" Foreground="DarkSlateGray"/>
+                                                            <TextBlock Text="MP3 Files:" FontWeight="SemiBold" Margin="0,10,0,0"/>
+                                                            <ItemsControl ItemsSource="{Binding Mp3FilesNames}">
+                                                                <ItemsControl.ItemTemplate>
+                                                                    <DataTemplate>
+                                                                        <TextBlock Text="{Binding}" Margin="5,0,0,0"/>
+                                                                    </DataTemplate>
+                                                                </ItemsControl.ItemTemplate>
+                                                            </ItemsControl>
+                                                            <ProgressBar Minimum="0" Maximum="100" Height="20" Margin="0,10,0,0"
+                                                         Value="{Binding Progress, Mode=OneWay}" />
+                                                        </StackPanel>
+
                                                         <!-- Buttons row -->
-                                                    </Grid.RowDefinitions>
-
-                                                    <!-- Checkbox top-right -->
-                                                    <CheckBox IsChecked="{Binding IsSelected}" Content="Select" 
-                          HorizontalAlignment="Right"  Margin="0,0,0,5" Grid.Row="0"/>
-
-                                                    <!-- Main content -->
-                                                    <StackPanel Grid.Row="1" Margin="0,10,0,0">
-                                                        <TextBlock Text="{Binding Title}" FontWeight="Bold" FontSize="16"/>
-                                                        <TextBlock Text="{Binding StatusText}" FontStyle="Italic" FontSize="12" Foreground="Gray" Margin="0,2,0,0"/>
-                                                        <TextBlock Text="EPUB File:" FontWeight="SemiBold" Margin="0,10,0,0"/>
-                                                        <TextBlock Text="{Binding EpubFileName}" Foreground="DarkSlateGray"/>
-                                                        <TextBlock Text="MP3 Files:" FontWeight="SemiBold" Margin="0,10,0,0"/>
-                                                        <ItemsControl ItemsSource="{Binding Mp3FilesNames}">
-                                                            <ItemsControl.ItemTemplate>
-                                                                <DataTemplate>
-                                                                    <TextBlock Text="{Binding}" Margin="5,0,0,0"/>
-                                                                </DataTemplate>
-                                                            </ItemsControl.ItemTemplate>
-                                                        </ItemsControl>
-                                                        <ProgressBar Minimum="0" Maximum="100" Height="20" Margin="0,10,0,0"
-                                 Value="{Binding Progress, Mode=OneWay}" />
-                                                    </StackPanel>
-
-                                                    <!-- Buttons in a horizontal row at the bottom -->
-                                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Grid.Row="2" Margin="0,10,0,0" >
-                                                        <Button Content="Align" Click="AlignButton_Click"
-                            Tag="{Binding FolderPath}"
-                            IsEnabled="{Binding Status, Converter={StaticResource StatusToEnabledConverter}}"
-                                                                Margin="0,0,10,0"
-                                                                />
-                                                        <Button Content="Reprocess Alignment" Click="ReprocessAlignment_Click"
-Visibility="{Binding Settings.ShowDebugOptions, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVisibilityConverter}}"
- Margin="0,0,10,0"/>
-                                                        <Button Content="View Alignment Log" Click="ViewAlignmentLog_Click"
-                            IsEnabled="{Binding HasAlignmentLog}" Margin="0,0,10,0"/>
-                                                    </StackPanel>
+                                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Grid.Row="2" Margin="0,10,0,0">
+                                                            <Button Content="Align" Click="AlignButton_Click"
+                                                    Tag="{Binding FolderPath}"
+                                                    IsEnabled="{Binding Status, Converter={StaticResource StatusToEnabledConverter}}"
+                                                    Margin="0,0,10,0"/>
+                                                            <Button Content="Reprocess Alignment" Click="ReprocessAlignment_Click"
+                                                    Visibility="{Binding Settings.ShowDebugOptions, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                    IsEnabled="{Binding Status, Converter={StaticResource StatusToEnabledConverter}}"
+                                                    Margin="0,0,10,0"/>
+                                                            <Button Content="View Alignment Log" Click="ViewAlignmentLog_Click"
+                                                    IsEnabled="{Binding HasAlignmentLog}" Margin="0,0,10,0"/>
+                                                        </StackPanel>
+                                                    </Grid>
                                                 </Grid>
-                                            </Grid>
-                                        </Border>
+                                            </Border>
 
-                                        <DataTemplate.Triggers>
-                                            <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                                                <Setter TargetName="BookBorder" Property="BorderBrush" Value="Blue"/>
-                                                <Setter TargetName="BookBorder" Property="BorderThickness" Value="2"/>
-                                            </DataTrigger>
-                                        </DataTemplate.Triggers>
-                                    </DataTemplate>
+                                            <DataTemplate.Triggers>
+                                                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                    <Setter TargetName="BookBorder" Property="BorderBrush" Value="Blue"/>
+                                                    <Setter TargetName="BookBorder" Property="BorderThickness" Value="2"/>
+                                                </DataTrigger>
+                                            </DataTemplate.Triggers>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </Grid>
+                        </ScrollViewer>
+                    </DataTemplate>
+                </TabControl.ContentTemplate>
 
-
-                                </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </ScrollViewer>
-                </DataTemplate>
-            </TabControl.ContentTemplate>
-        </TabControl>
-
-        </StackPanel>
+            </TabControl>
+        </Grid>
 
 
 

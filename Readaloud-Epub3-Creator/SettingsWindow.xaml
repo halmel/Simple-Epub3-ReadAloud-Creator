@@ -5,49 +5,45 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:ui="http://schemas.modernwpf.com/2019"
         ui:WindowHelper.UseModernWindowStyle="True"
-        Title="Settings" Height="auto" Width="500" WindowStartupLocation="CenterOwner"
+        Title="Settings" Height="500" Width="750" WindowStartupLocation="CenterOwner"
         mc:Ignorable="d">
 
-    <StackPanel Margin="20" VerticalAlignment="Top" >
+    <!-- Center everything horizontally -->
+    <StackPanel Margin="20" VerticalAlignment="Top" HorizontalAlignment="Center" Width="Auto">
 
-        <TextBlock Text="Ebooks Folder Path" FontWeight="Bold"/>
-        <StackPanel Orientation="Horizontal">
-            <TextBox x:Name="PathTextBox" Width="350" IsReadOnly="True"/>
+        <TextBlock Text="Ebooks Folder Path" FontWeight="Bold" TextAlignment="Center" Width="350"/>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,5,0,10">
+            <TextBox x:Name="PathTextBox" Width="550" IsReadOnly="True"/>
             <Button Content="Browse" Click="Browse_Click" Margin="10,0,0,0"/>
         </StackPanel>
-
-        <TextBlock Text="Device" FontWeight="Bold"/>
-        <ComboBox x:Name="DeviceComboBox" Width="120" >
+        <TextBlock Text="Transcriber Python Executable Path" FontWeight="Bold" Margin="0,10,0,0" TextAlignment="Center" Width="450"/>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,5,0,10">
+            <TextBox x:Name="TranscriberPathTextBox" Width="550" IsReadOnly="True"/>
+            <Button Content="Browse" Click="BrowseTranscriber_Click" Margin="10,0,0,0"/>
+        </StackPanel>
+        <TextBlock Text="Device" FontWeight="Bold" TextAlignment="Center" Width="120"/>
+        <ComboBox x:Name="DeviceComboBox" Width="120" HorizontalAlignment="Center">
             <ComboBoxItem Content="cuda"/>
             <ComboBoxItem Content="cpu"/>
         </ComboBox>
 
-        <TextBlock Text="Max Concurrent Transcriptions (only applies when device is set to 'cpu')" 
-           FontWeight="Bold" 
-           Margin="0,10,0,0" 
-           TextWrapping="Wrap"/>
+        <TextBlock Text="Max Concurrent Transcriptions&#x0a;(only applies when device is set to 'cpu')" 
+           FontWeight="Bold" TextWrapping="Wrap" Width="350" TextAlignment="Center" Margin="0,10,0,5"/>
+
         <ui:NumberBox x:Name="MaxConcurrentNumberBox"
-              Width="120"
-              Minimum="1"
-              Maximum="32"
-              SpinButtonPlacementMode="Inline"
-              HorizontalAlignment="Left"/>
+                      Width="120"
+                      Minimum="1"
+                      Maximum="32"
+                      SpinButtonPlacementMode="Inline"
+                      HorizontalAlignment="Center"
+                      Margin="0,5,0,10"/>
 
-        <TextBlock Text="Transcriber Python Executable Path" FontWeight="Bold" Margin="0,10,0,0"/>
-        <StackPanel Orientation="Horizontal">
-            <TextBox x:Name="TranscriberPathTextBox" Width="350" IsReadOnly="True"/>
-            <Button Content="Browse" Click="BrowseTranscriber_Click" Margin="10,0,0,0"/>
-        </StackPanel>
 
-        <CheckBox IsChecked="{Binding ShowDebugOptions}" Margin="0,10,0,0">
-            <TextBlock Text="Show Debug Options" FontWeight="Bold"/>
+        <CheckBox IsChecked="{Binding ShowDebugOptions}" Margin="0,10,0,0" HorizontalAlignment="Center">
+            <TextBlock Text="Show Debug Options" FontWeight="Bold" TextAlignment="Center"/>
         </CheckBox>
 
-
-
-
-
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="10,20,10,10">
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="10,20,10,10">
             <Button Content="Delete Settings" Click="DeleteSettings_Click" Margin="0,0,10,0"/>
             <Button Content="Save" Click="Save_Click" Margin="0,0,10,0"/>
             <Button Content="Cancel" Click="Cancel_Click"/>
