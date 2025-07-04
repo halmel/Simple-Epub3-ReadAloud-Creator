@@ -84,49 +84,46 @@ namespace Readaloud_Epub3_Creator
                 // STEP 1: Extract EPUB
                 ZipFile.ExtractToDirectory(originalEpubPath, tempDir);
 
-                // STEP 2: Replace HTML files
+                // STEP 2: Locate content.opf and set working root
+                string opfPath = Directory.GetFiles(tempDir, "*.opf", SearchOption.AllDirectories).FirstOrDefault();
+                if (opfPath == null)
+                    throw new Exception("OPF file not found.");
+
+                string contentRoot = Path.GetDirectoryName(opfPath);
+
+                // STEP 3: Replace HTML files
                 foreach (var kvp in updatedHtmlDocs)
                 {
                     string fileNameOnly = Path.GetFileName(kvp.Key);
-                    // Recursively search for file by name only, case-insensitive
                     string htmlPath = Directory
-                        .EnumerateFiles(tempDir, "*", SearchOption.AllDirectories)
+                        .EnumerateFiles(contentRoot, "*", SearchOption.AllDirectories)
                         .FirstOrDefault(f => string.Equals(Path.GetFileName(f), fileNameOnly, StringComparison.OrdinalIgnoreCase));
 
                     if (htmlPath != null)
                     {
                         using (var sw = new StringWriter())
                         {
-                            kvp.Value.Save(sw); // Forces rebuild of the HTML tree
-                            string forcedUpdatedHtml = sw.ToString(); // Contains the latest DOM changes
-                            File.WriteAllText(htmlPath, forcedUpdatedHtml); // Write fully-updated HTML
+                            kvp.Value.Save(sw);
+                            string updatedHtml = sw.ToString();
+                            File.WriteAllText(htmlPath, updatedHtml);
                         }
                     }
                 }
 
+                // STEP 4: Prepare folders relative to content.opf
+                string audioDir = Path.Combine(contentRoot, "Audio");
+                string mediaOverlaysDir = Path.Combine(contentRoot, "MediaOverlays");
 
-                // STEP 3: Prepare folders at EPUB root
-                string audioDir = Path.Combine(tempDir, "Audio");
-                string mediaOverlaysDir = Path.Combine(tempDir, "MediaOverlays");
+                Directory.CreateDirectory(audioDir);
+                Directory.CreateDirectory(mediaOverlaysDir);
 
-                if (!Directory.Exists(audioDir))
-                    Directory.CreateDirectory(audioDir);
-
-                if (!Directory.Exists(mediaOverlaysDir))
-                    Directory.CreateDirectory(mediaOverlaysDir);
-
-                // Copy files into their folders
                 foreach (var smilFile in smilFiles)
                     File.Copy(smilFile, Path.Combine(mediaOverlaysDir, Path.GetFileName(smilFile)), true);
 
                 foreach (var audioFile in audioFiles)
                     File.Copy(audioFile, Path.Combine(audioDir, Path.GetFileName(audioFile)), true);
 
-                // STEP 4: Patch OPF manifest
-                string opfPath = Directory.GetFiles(tempDir, "*.opf", SearchOption.AllDirectories).FirstOrDefault();
-                if (opfPath == null)
-                    throw new Exception("OPF file not found.");
-
+                // STEP 5: Patch OPF manifest
                 var doc = new XmlDocument();
                 doc.Load(opfPath);
 
@@ -137,17 +134,14 @@ namespace Readaloud_Epub3_Creator
                 if (manifest == null)
                     throw new Exception("Manifest not found in OPF.");
 
-                // STEP 4b: Add <meta> duration elements inside <metadata> in OPF
                 var metadataNode = doc.SelectSingleNode("//opf:metadata", nsmgr);
                 if (metadataNode == null)
                 {
-                    // create <metadata> if missing
                     metadataNode = doc.CreateElement("metadata", doc.DocumentElement.NamespaceURI);
                     doc.DocumentElement.InsertBefore(metadataNode, doc.DocumentElement.FirstChild);
                 }
 
-                // Prepare mapping SMIL file -> id and durations for metadata
-                var smilMap = new Dictionary<string, string>(); // HTML href => SMIL id
+                var smilMap = new Dictionary<string, string>();
                 var smilDurations = new List<double>();
 
                 foreach (var smilPath in smilFiles)
@@ -172,7 +166,7 @@ namespace Readaloud_Epub3_Creator
 
                     smilMap[htmlFile] = smilId;
                     double durationSeconds = ExtractTotalLengthFromSmilSeconds(smilPath);
-                    string smilDuration = ToEpubMetadataTime(durationSeconds);  // Reuse your own formatter
+                    string smilDuration = ToEpubMetadataTime(durationSeconds);
 
                     var meta = doc.CreateElement("meta", doc.DocumentElement.NamespaceURI);
                     meta.SetAttribute("property", "media:duration");
@@ -180,46 +174,39 @@ namespace Readaloud_Epub3_Creator
                     meta.InnerText = smilDuration;
                     metadataNode.AppendChild(meta);
 
-                    smilDurations.Add( durationSeconds);
+                    smilDurations.Add(durationSeconds);
 
-                    // Add <item> for SMIL file in manifest
-                    XmlElement item = doc.CreateElement("item", manifest.NamespaceURI);
+                    var item = doc.CreateElement("item", manifest.NamespaceURI);
                     item.SetAttribute("id", smilId);
                     item.SetAttribute("href", smilHref);
                     item.SetAttribute("media-type", "application/smil+xml");
                     manifest.AppendChild(item);
                 }
 
-                // 2. Add audio files to manifest
                 int audioIndex = 1;
                 foreach (var audio in audioFiles)
                 {
                     string fileName = Path.GetFileName(audio);
-                    string safeId = $"a{audioIndex++}"; // Sequential and starts with a letter
+                    string safeId = $"a{audioIndex++}";
 
-                    XmlElement item = doc.CreateElement("item", manifest.NamespaceURI);
+                    var item = doc.CreateElement("item", manifest.NamespaceURI);
                     item.SetAttribute("id", safeId);
                     item.SetAttribute("href", $"Audio/{fileName}");
                     item.SetAttribute("media-type", "audio/mpeg");
                     manifest.AppendChild(item);
                 }
 
-
-                // 3. Link SMIL overlays to HTML items using mapping
                 var htmlItems = doc.SelectNodes("//opf:item[@media-type='application/xhtml+xml']", nsmgr);
                 foreach (XmlElement item in htmlItems)
                 {
                     string href = item.GetAttribute("href");
-                    if (smilMap.TryGetValue(href, out var smilId))
+                    if (smilMap.TryGetValue(Path.GetFileName(href), out var smilId))
                     {
                         item.SetAttribute("media-overlay", smilId);
                     }
                 }
 
-
-
-
-                double totalDurationSeconds = smilDurations.Sum(); // List<double>
+                double totalDurationSeconds = smilDurations.Sum();
                 string totalDuration = ToEpubMetadataTime(totalDurationSeconds);
 
                 var totalMeta = doc.CreateElement("meta", doc.DocumentElement.NamespaceURI);
@@ -227,31 +214,22 @@ namespace Readaloud_Epub3_Creator
                 totalMeta.InnerText = totalDuration;
                 metadataNode.AppendChild(totalMeta);
 
-
                 doc.Save(opfPath);
 
-
-
-
-                doc.Save(opfPath);
-
-
-                // STEP 5: Repack EPUB properly
+                // STEP 6: Repack EPUB
                 if (File.Exists(outputEpubPath))
                     File.Delete(outputEpubPath);
 
-
                 using (var zip = ZipFile.Open(outputEpubPath, ZipArchiveMode.Create))
                 {
-                    // mimetype first, no compression
                     string mimetypePath = Path.Combine(tempDir, "mimetype");
                     zip.CreateEntryFromFile(mimetypePath, "mimetype", CompressionLevel.NoCompression);
 
-                    // Add the rest of files
                     foreach (string file in Directory.GetFiles(tempDir, "*", SearchOption.AllDirectories))
                     {
                         string entryName = Path.GetRelativePath(tempDir, file).Replace('\\', '/');
                         if (entryName == "mimetype") continue;
+
                         zip.CreateEntryFromFile(file, entryName, CompressionLevel.Optimal);
                     }
                 }
@@ -262,6 +240,7 @@ namespace Readaloud_Epub3_Creator
                     Directory.Delete(tempDir, true);
             }
         }
+
 
 
         private static string ToEpubMetadataTime(double totalSeconds)
