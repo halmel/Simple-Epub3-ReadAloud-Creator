@@ -3,6 +3,15 @@
 > ⚠️ **ALPHA SOFTWARE – USE AT YOUR OWN RISK**  
 > This project is still in early development and may break, crash, or corrupt files.  
 > Please **test on backups** and do not use on important data.
+A simple tool for creating synchronized audio books from text books.
+
+---
+
+Inspired by:
+- [Storyteller Platform](https://storyteller-platform.gitlab.io/storyteller/)
+- [syncabook by r4victor](https://github.com/r4victor/syncabook)
+
+The goal of this project is to create a simpler, more user-friendly alternative to the Storyteller app.
 
 ---
 
@@ -57,15 +66,6 @@ You have two options:
 
 ---
 
-A simple tool for creating synchronized audio books from text books.
-
-Inspired by:
-- [Storyteller Platform](https://storyteller-platform.gitlab.io/storyteller/)
-- [syncabook by r4victor](https://github.com/r4victor/syncabook)
-
-The goal of this project is to create a simpler, more user-friendly alternative to the Storyteller app.
-
----
 
 ## 📖 Reading the Synced Book
 
