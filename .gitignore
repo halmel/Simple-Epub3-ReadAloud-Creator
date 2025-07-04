@@ -369,6 +369,8 @@ LatestRelease\net9.0-windows\config.json
 /Ebooks/*
 !/Ebooks/Main/
 /Ebooks/Main/*
+!/Ebooks/Main/.gitkeep
+
 
 
 # Ignore everything in the venv folder...
