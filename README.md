@@ -90,3 +90,27 @@ Supports manual import of processed books.
 A solid and stable option for EPUB3 read-aloud support.
 
 ---
+## 🐞 Debugging & Development
+
+- If the alignment result looks wrong or broken, you can send the alignment log file for inspection: Ebooks<GroupName><BookName>\OriginalEpub\AlignmentLog.json
+- 
+This log helps diagnose what went wrong during the alignment process.
+
+
+- **Developing the app**:  
+Open the solution in **Visual Studio** to start contributing.
+
+- The transcriber logic is mostly in the `transcriber.py` script.  
+You can simply edit and save this file, and changes will be reflected in the app immediately.
+
+---
+
+### 🔧 To Do
+
+- UI design improvements  
+- Better book processing feedback  
+- Properly stop the Python script when the app closes  
+- Model size selector option  
+- Multi-language testing — in theory it should work, possibly with larger models  
+- Alignment optimization  
+- Ability to set alignment parameters from the app’s settings
