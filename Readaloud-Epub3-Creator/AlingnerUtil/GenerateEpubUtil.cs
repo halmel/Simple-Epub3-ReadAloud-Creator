@@ -86,14 +86,17 @@ namespace Readaloud_Epub3_Creator
 
             var audioGaps = CollectAudioLinkGaps(words);
             FillSegmentGaps(ref words, segments1, audioGaps);
+
+
             AssignSentenceIndices(words, htmlDocs);
+            TagWordsWithSmilSpans(words);
+
             Console.WriteLine("generating smil files");
             string smilPath = Path.Combine(epubFolderPathNew, "MediaOverlays");
             GenerateSplitSmilFilesGroupedByFile(words, smilPath);
-            TagWordsWithSmilSpans(words);
 
-            var editedSegments = CollectAudioLinkGaps(words);
-            var recombinedSegments = RecombineWordsIntoTextSegments(words);
+
+            List<HtmlTextSegment> recombinedSegments = RecombineWordsIntoTextSegments(words);
 
             ApplyTextSegmentsToHtmlDocuments(htmlDocs, recombinedSegments);
 
@@ -166,6 +169,82 @@ namespace Readaloud_Epub3_Creator
             );
         }
 
+
+        public static void AssignSentenceIndices(List<WordSegment> words, Dictionary<string, HtmlDocument> DocDict)
+        {
+            var sortedWords = words.OrderBy(w => w.IndexInList).ToList();
+            int globalSentenceCounter = 0;
+
+            var byFile = sortedWords.GroupBy(w => w.FileName);
+
+            foreach (var fileGroup in byFile)
+            {
+                string fileName = fileGroup.Key;
+
+                // Group by segment group (based on linked segments)
+                var bySegmentGroup = fileGroup
+                    .GroupBy(w => string.Join(",", w.LinkedSegments.Select(s => $"{s.fileId}_seg-{s.id}")))
+                    .ToList();
+
+                foreach (var segmentGroup in bySegmentGroup)
+                {
+                    var wordList = segmentGroup.OrderBy(w => w.IndexInList).ToList();
+
+                    if (wordList.Count == 0) continue;
+
+                    int sentenceIndex = globalSentenceCounter;
+                    string currentParentXPath = wordList[0].ParentXPath;
+
+                    for (int i = 0; i < wordList.Count; i++)
+                    {
+                        var word = wordList[i];
+
+                        if (word.ParentXPath != currentParentXPath)
+                        {
+                            // Determine if the current word's parent is fully contained in the previous
+                            if (!IsFullyContainedSegment(word.ParentXPath, currentParentXPath, wordList))
+                            {
+                                // Not fully contained → start new sentence
+                                sentenceIndex++;
+                                currentParentXPath = word.ParentXPath;
+                            }
+                            // else → continue with the current sentenceIndex
+                        }
+
+                        word.SentenceIndex = sentenceIndex;
+                    }
+
+                    globalSentenceCounter = sentenceIndex + 1;
+                }
+            }
+        }
+
+        private static bool IsFullyContainedSegment(string childXPath, string parentXPath, List<WordSegment> wordList)
+        {
+            // Get all words for the child XPath
+            var childWords = wordList
+                .Where(w => w.ParentXPath == childXPath)
+                .OrderBy(w => w.IndexInList)
+                .ToList();
+
+            var parentWords = wordList
+                .Where(w => w.ParentXPath == parentXPath)
+                .OrderBy(w => w.IndexInList)
+                .ToList();
+
+            if (!childWords.Any() || !parentWords.Any())
+                return false;
+
+            int childStart = childWords.First().IndexInList;
+            int childEnd = childWords.Last().IndexInList;
+
+            int parentStart = parentWords.First().IndexInList;
+            int parentEnd = parentWords.Last().IndexInList;
+
+            return childStart >= parentStart && childEnd <= parentEnd;
+        }
+
+
         public static void TagWordsWithSmilSpans(List<WordSegment> words)
         {
             var byFile = words.GroupBy(w => w.FileName);
@@ -228,66 +307,9 @@ namespace Readaloud_Epub3_Creator
         }
 
 
-        public static void AssignSentenceIndices(List<WordSegment> words, Dictionary<string, HtmlDocument> DocDict)
-        {
-            // Sort all words globally
-            var sortedWords = words.OrderBy(w => w.IndexInList).ToList();
 
-            List<List<WordSegment>> contextualGroups = new();
 
-            for (int i = 0; i < sortedWords.Count; i++)
-            {
-                var currentWord = sortedWords[i];
-                var currentDoc = DocDict[currentWord.FileName];
-                var currentNode = currentDoc.DocumentNode.SelectSingleNode(currentWord.ParentXPath);
-                if (currentNode == null) continue;
 
-                if (contextualGroups.Count == 0)
-                {
-                    contextualGroups.Add(new List<WordSegment> { currentWord });
-                    continue;
-                }
-
-                var lastGroup = contextualGroups.Last();
-                var previousWord = lastGroup.Last();
-                var previousDoc = DocDict[previousWord.FileName];
-                var previousNode = previousDoc.DocumentNode.SelectSingleNode(previousWord.ParentXPath);
-
-                HtmlNode nextNode = null;
-                if (i + 1 < sortedWords.Count)
-                {
-                    var nextWord = sortedWords[i + 1];
-                    var nextDoc = DocDict[nextWord.FileName];
-                    nextNode = nextDoc.DocumentNode.SelectSingleNode(nextWord.ParentXPath);
-                }
-
-                bool sameAsPrevious = previousNode != null && previousNode.ParentNode == currentNode.ParentNode;
-                bool sameAsNext = nextNode != null && nextNode.ParentNode == currentNode.ParentNode;
-
-                if (sameAsPrevious || sameAsNext)
-                {
-                    lastGroup.Add(currentWord);
-                }
-                else
-                {
-                    contextualGroups.Add(new List<WordSegment> { currentWord });
-                }
-            }
-
-            // Assign SentenceIndex globally
-            int globalSentenceIndex = 0;
-            foreach (var group in contextualGroups)
-            {
-                var sentenceGroups = SplitBySentence(group);
-                foreach (var sentence in sentenceGroups)
-                {
-
-                        foreach (var word in sentence)
-                            word.SentenceIndex = globalSentenceIndex;
-                        globalSentenceIndex++;
-                }
-            }
-        }
 
 
 
