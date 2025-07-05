@@ -14,6 +14,14 @@ Inspired by:
 The goal of this project is to create a simpler, more user-friendly alternative to the Storyteller app.
 
 ---
+### 🖼️ App Example
+
+<img src="./ReadMeAssets/Simple-Epub3-ReadAloud-Creator-Example.png" alt="App Screenshot" width="700"/>
+### 🔊 Example Output in Thorium Reader
+
+<img src="./ReadMeAssets/Thorium Reader Readaloud Example.gif" alt="Thorium Reader Readaloud Demo" width="700"/>
+
+---
 
 ## 🧰 Requirements
 - ✅ [.NET Desktop Runtime 9](https://dotnet.microsoft.com/download/dotnet/9.0/runtime-desktop)  (Required to **run** the WPF application)
