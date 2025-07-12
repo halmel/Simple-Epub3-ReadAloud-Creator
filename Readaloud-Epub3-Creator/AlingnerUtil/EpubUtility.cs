@@ -490,6 +490,8 @@ namespace Readaloud_Epub3_Creator
                 .ToList();
 
             int parGlobalCounter = 0;
+            string previousSegmentGroupKey = null;
+            double PreviousEndTime = 0;
 
             foreach (var fileGroup in groupedByFile)
             {
@@ -532,11 +534,40 @@ namespace Readaloud_Epub3_Creator
                     .GroupBy(w => string.Join(";", w.LinkedSegments.Select(s => $"{s.fileId}_{s.id}")))
                     .ToList();
 
-                double PreviusEndTime = 0;
+
+
+
+
                 double FileEnd = fileGroup.ToList().First(x => x.LinkedSegments.Count > 0).LinkedSegments[0].fileLength;
+
+
+
+
+
+
+
 
                 foreach (var segmentGroup in bySegmentSet)
                 {
+
+                    string currentSegmentGroupKey = string.Join(";", segmentGroup.SelectMany(w => w.LinkedSegments)
+    .Select(s => $"{s.fileId}")
+    .Distinct());
+
+                    bool isSameGroupAsBefore = currentSegmentGroupKey == previousSegmentGroupKey;
+
+                    if (!isSameGroupAsBefore)
+                    {
+                        // If the new segmentGroup is a new logical group, reset
+                        PreviousEndTime = 0;
+                    }
+
+                    previousSegmentGroupKey = currentSegmentGroupKey;
+
+
+
+
+
                     var wordsWithSameSegments = segmentGroup.ToList();
                     List<IGrouping<int, WordSegment>> sentenceGroups = wordsWithSameSegments
                         .GroupBy(w => w.SentenceIndex)
@@ -548,7 +579,7 @@ namespace Readaloud_Epub3_Creator
                     var lastSeg = allSegments.OrderBy(s => s.IndexInList).Last();
 
                     string audioSrc = $"{audioFolder}{firstSeg.fileId}";
-                    double clipBegin = PreviusEndTime;
+                    double clipBegin = PreviousEndTime;
 
                     double clipEnd = lastSeg.end;
                     if (segmentGroup == bySegmentSet.Last())
@@ -587,7 +618,7 @@ namespace Readaloud_Epub3_Creator
                             clipBegin = clipEnd;
                         }
                     }
-                    PreviusEndTime = clipEnd;
+                    PreviousEndTime = clipEnd;
                     parGlobalCounter++;
                 }
 

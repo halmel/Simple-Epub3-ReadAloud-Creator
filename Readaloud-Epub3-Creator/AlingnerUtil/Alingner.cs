@@ -73,6 +73,8 @@ namespace Readaloud_Epub3_Creator
 
             int maxSegIdx = Math.Max(0, segments.Count - 6);
 
+            int failedAnchorsInARow = 0;
+
             for (int i = 0; i < anchorCount; i++)
             {
                 int segIdx = i * maxSegIdx / (anchorCount - 1);
@@ -83,9 +85,14 @@ namespace Readaloud_Epub3_Creator
 
                 int tempPos = currentWordPos;
 
+                // Dynamically increase search window based on consecutive failures
+                int baseWindow = words.Count / anchorCount;
+                int extraWindow = failedAnchorsInARow * baseWindow;
+                int searchWindow = (int)(baseWindow * 1.5) + extraWindow;
+
                 var match = TrySlowMatch(
                     segments, segIdx, words, ref tempPos,
-                    hardDistanceLimit: (int)((words.Count/ anchorCount)*1.5),
+                    hardDistanceLimit: searchWindow,
                     scoreThreshold: 70
                 );
 
@@ -98,17 +105,20 @@ namespace Readaloud_Epub3_Creator
                 if (!hasMatch)
                 {
                     level = LogLevel.Red;
-                    message = "Anchor skipped: no match found";
+                    message = $"Anchor skipped: no match found (fail count = {failedAnchorsInARow + 1})";
+                    failedAnchorsInARow++;
                 }
                 else if (regressed)
                 {
                     level = LogLevel.Yellow;
                     message = $"Anchor regressed: tempPos={tempPos}, currentWordPos={currentWordPos}";
+                    failedAnchorsInARow++;
                 }
                 else
                 {
                     level = LogLevel.Green;
                     message = "Anchor matched successfully";
+                    failedAnchorsInARow = 0;
                 }
 
                 LogOutcome(
@@ -127,6 +137,7 @@ namespace Readaloud_Epub3_Creator
                     currentWordPos = tempPos;
                 }
             }
+
 
 
 
@@ -155,12 +166,13 @@ namespace Readaloud_Epub3_Creator
                 var subWords = words.GetRange(startWords, endWords - startWords);
                 int localPos = 0;
 
+
                 for (int j = 0; j < subSegments.Count; j++)
                 {
                     var seg = subSegments[j];
                     int globalIdx = startSeg + 1 + j;
 
-                    // Fast match
+                    // --- FAST MATCH ---
                     var fast = TryFastMatch(subSegments, j, subWords, localPos, scoreThreshold, maxLookahead);
                     if (fast != null && fast.TryGetValue(seg, out var fMatch))
                     {
@@ -180,35 +192,68 @@ namespace Readaloud_Epub3_Creator
                         continue;
                     }
 
-                    // Slow match
-                    int posRef = localPos;
+                    // --- SLOW MATCH with SAFE REFERENCE HANDLING & ROBUST CORRECTION ---
+                    int lookbackLimit = 100;
+                    int backwardPos = Math.Max(0, localPos - lookbackLimit);
+                    int tentativePos = backwardPos;
+
                     var slow = TrySlowMatch(
                         subSegments,
                         j,
                         subWords,
-                        ref posRef,
-                        hardDistanceLimit: 100,
+                        ref tentativePos, // temp, not actual localPos
+                        hardDistanceLimit: 1000,
                         scoreThreshold
                     );
-
-                    result[seg] = slow ?? new List<WordSegment>();
 
                     var hasSlowMatch = slow != null && slow.Count > 0;
                     var level = hasSlowMatch ? LogLevel.Yellow : LogLevel.Red;
                     var msg = hasSlowMatch ? "SlowMatch fallback" : "Match skipped";
 
+                    // --- Targeted Cleanup of Previous Entries ---
+                    if (hasSlowMatch && tentativePos < localPos)
+                    {
+                        int matchStart = startWords + tentativePos;
+                        int matchEnd = matchStart + slow.Count;
+
+                        var toRemove = result
+                            .Where(kvp => kvp.Value.Any(ws =>
+                                ws.IndexInList >= matchStart && ws.IndexInList < matchEnd))
+                            .Select(kvp => kvp.Key)
+                            .ToList();
+
+                        foreach (var rem in toRemove)
+                        {
+                            result.Remove(rem);
+                            LogOutcome(
+                                segments.IndexOf(rem),
+                                LogLevel.Yellow,
+                                "Removed misaligned segment due to backward correction",
+                                tentativePos,
+                                subWords,
+                                rem.text,
+                                null
+                            );
+                        }
+                    }
+
+                    if (hasSlowMatch)
+                    {
+                        result[seg] = slow;
+                        localPos = tentativePos; // Advance position only on success
+                    }
+
                     LogOutcome(
                         globalIdx,
                         level,
                         msg,
-                        posRef,
+                        tentativePos,
                         subWords,
                         seg.text,
                         slow
                     );
 
 
-                    localPos = posRef;
                 }
             }
 
@@ -435,7 +480,7 @@ namespace Readaloud_Epub3_Creator
                         stagnantCycles++;
 
                         // Early exit condition
-                        if (bestScore >= 80 && stagnantCycles >= 10)
+                        if (bestScore >= scoreThreshold && stagnantCycles >= 10)
                         {
                             Console.WriteLine("Early exit due to stagnation.");
                             (bestScore, bestLen) = FindBestMatchAt(wordStream, bestPos, segment.text);

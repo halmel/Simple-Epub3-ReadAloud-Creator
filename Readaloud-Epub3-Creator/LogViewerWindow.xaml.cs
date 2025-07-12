@@ -52,7 +52,6 @@ namespace Readaloud_Epub3_Creator
 
             var finalLogs = logs
                 .Where((_, index) => importantIndexes.Contains(index))
-                .OrderBy(e => e.SegmentIndex)
                 .ToList();
 
             if (skippedCount > 0)
