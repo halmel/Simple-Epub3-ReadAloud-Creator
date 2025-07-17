@@ -88,7 +88,6 @@ Great for testing read-aloud EPUB3 books. Actively maintained.
 ### ✅ [Menestrello](https://github.com/readbeyond/menestrello)  
 **Platforms:** iOS, Android  
 Good for reading.  
-⚠️ One known issue: the audio playback bar is broken — even with books made by Storyteller. Root cause unknown.
 
 ---
 
