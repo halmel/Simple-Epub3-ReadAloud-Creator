@@ -88,7 +88,6 @@ Great for testing read-aloud EPUB3 books. Actively maintained.
 ### ✅ [Menestrello](https://github.com/readbeyond/menestrello)  
 **Platforms:** iOS, Android  
 Good for reading.  
-⚠️ One known issue: the audio playback bar is broken — even with books made by Storyteller. Root cause unknown.
 
 ---
 
@@ -101,8 +100,7 @@ A solid and stable option for EPUB3 read-aloud support.
 ## 🐞 Debugging & Development
 
 - If the alignment result looks wrong or broken, you can send the alignment log file for inspection: Ebooks<GroupName><BookName>\OriginalEpub\AlignmentLog.json
-- 
-This log helps diagnose what went wrong during the alignment process.
+- This log helps diagnose what went wrong during the alignment process.
 
 
 - **Developing the app**:  
