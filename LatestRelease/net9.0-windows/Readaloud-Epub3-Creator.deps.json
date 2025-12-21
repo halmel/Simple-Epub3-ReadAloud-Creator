@@ -9,6 +9,7 @@
       "Readaloud-Epub3-Creator/1.0.0": {
         "dependencies": {
           "EpubSharp.dll": "1.1.5",
+          "F23.StringSimilarity": "7.0.0",
           "FuzzySearch.Net": "1.1.0",
           "FuzzySharp": "2.0.2",
           "HtmlAgilityPack": "1.12.1",
@@ -29,6 +30,17 @@
           "lib/netcoreapp1.1/EpubSharp.dll": {
             "assemblyVersion": "1.1.5.0",
             "fileVersion": "1.1.5.0"
+          }
+        }
+      },
+      "F23.StringSimilarity/7.0.0": {
+        "dependencies": {
+          "System.Memory": "4.6.3"
+        },
+        "runtime": {
+          "lib/netstandard2.0/F23.StringSimilarity.dll": {
+            "assemblyVersion": "7.0.0.0",
+            "fileVersion": "7.0.0.0"
           }
         }
       },
@@ -472,6 +484,12 @@
           },
           "lib/net5.0-windows7.0/fi-FI/ModernWpf.resources.dll": {
             "locale": "fi-FI"
+          },
+          "lib/net5.0-windows7.0/fil-PH/ModernWpf.Controls.resources.dll": {
+            "locale": "fil-PH"
+          },
+          "lib/net5.0-windows7.0/fil-PH/ModernWpf.resources.dll": {
+            "locale": "fil-PH"
           },
           "lib/net5.0-windows7.0/fr-CA/ModernWpf.Controls.resources.dll": {
             "locale": "fr-CA"
@@ -1204,6 +1222,7 @@
           "System.Runtime": "4.3.0"
         }
       },
+      "System.Memory/4.6.3": {},
       "System.Net.Http/4.3.0": {
         "dependencies": {
           "Microsoft.NETCore.Platforms": "1.1.0",
@@ -1862,6 +1881,13 @@
       "path": "epubsharp.dll/1.1.5",
       "hashPath": "epubsharp.dll.1.1.5.nupkg.sha512"
     },
+    "F23.StringSimilarity/7.0.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-aCyLTIsg5kp1bdShTVUiyJb+H68N43CqK5tRsEckop7ClKnvb4gqqMpPzljot1QCUCQt/EJCNfVbuAaYfGjxUA==",
+      "path": "f23.stringsimilarity/7.0.0",
+      "hashPath": "f23.stringsimilarity.7.0.0.nupkg.sha512"
+    },
     "FuzzySearch.Net/1.1.0": {
       "type": "package",
       "serviceable": true,
@@ -2400,6 +2426,13 @@
       "sha512": "sha512-In1Bmmvl/j52yPu3xgakQSI0YIckPUr870w4K5+Lak3JCCa8hl+my65lABOuKfYs4ugmZy25ScFerC4nz8+b6g==",
       "path": "system.linq.queryable/4.3.0",
       "hashPath": "system.linq.queryable.4.3.0.nupkg.sha512"
+    },
+    "System.Memory/4.6.3": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-qdcDOgnFZY40+Q9876JUHnlHu7bosOHX8XISRoH94fwk6hgaeQGSgfZd8srWRZNt5bV9ZW2TljcegDNxsf+96A==",
+      "path": "system.memory/4.6.3",
+      "hashPath": "system.memory.4.6.3.nupkg.sha512"
     },
     "System.Net.Http/4.3.0": {
       "type": "package",

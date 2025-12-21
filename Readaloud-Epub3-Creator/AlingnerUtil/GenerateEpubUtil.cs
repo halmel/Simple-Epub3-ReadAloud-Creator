@@ -93,7 +93,8 @@ namespace Readaloud_Epub3_Creator
 
             Console.WriteLine("generating smil files");
             string smilPath = Path.Combine(epubFolderPathNew, "MediaOverlays");
-            GenerateSplitSmilFilesGroupedByFile(words, smilPath);
+            NormalizeSegmentsToFullMp3Length(words);
+            GenerateSmilFiles(words, smilPath);
 
 
             List<HtmlTextSegment> recombinedSegments = RecombineWordsIntoTextSegments(words);
@@ -183,7 +184,7 @@ namespace Readaloud_Epub3_Creator
 
                 // Group by segment group (based on linked segments)
                 var bySegmentGroup = fileGroup
-                    .GroupBy(w => string.Join(",", w.LinkedSegments.Select(s => $"{s.fileId}_seg-{s.id}")))
+                    .GroupBy(w => string.Join(",", w.LinkedSegments.Select(s => $"{s.fileId}_seg-{s.IndexInList}")))
                     .ToList();
 
                 foreach (var segmentGroup in bySegmentGroup)
@@ -256,7 +257,7 @@ namespace Readaloud_Epub3_Creator
 
                 // Group by unique segment ID key
                 var bySegmentGroup = fileGroup
-                    .GroupBy(w => string.Join(",", w.LinkedSegments.Select(s => $"{s.fileId}_seg-{s.id}")))
+                    .GroupBy(w => string.Join(",", w.LinkedSegments.Select(s => $"{s.fileId}_seg-{s.IndexInList}")))
                     .ToList();
 
                 foreach (var segmentGroup in bySegmentGroup)

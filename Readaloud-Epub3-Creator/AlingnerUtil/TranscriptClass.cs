@@ -59,52 +59,26 @@ namespace Readaloud_Epub3_Creator
             return result;
         }
         public static string RunTranscription(
-        string venvPath,
-        string scriptPath,
-        string[] mp3Files,
-        string device,
-        string outputPath,
-        int workers = 2,
-        Action<int>? onProgress = null
-    )
+            string venvPath,
+            string scriptPath,
+            string[] mp3Files,
+            string device,
+            string outputPath,
+            int workers = 2,
+            Action<int>? onProgress = null
+        )
         {
-            string pythonExe = Path.Combine(venvPath, "Scripts", "python.exe"); // Windows venv
+            string pythonExe = Path.Combine(venvPath, "Scripts", "python.exe");
 
-            // If the venv doesn't exist, try to create it in the parent directory
             if (!File.Exists(pythonExe))
-            {
-                Console.WriteLine("Virtual environment not found. Attempting to create...");
+                throw new FileNotFoundException("Python executable not found at: " + pythonExe);
 
-                string parentDir = Path.GetFullPath(Path.Combine(venvPath, ".."));
-                string newVenvPath = Path.Combine(parentDir, "venv");
-                string newPythonExe = Path.Combine(newVenvPath, "Scripts", "python.exe");
+            // ✅ Write MP3 file list to temp file
+            string tempListPath = Path.Combine(Path.GetTempPath(), "mp3_list.txt");
+            File.WriteAllLines(tempListPath, mp3Files);
 
-                var createVenv = new Process
-                {
-                    StartInfo = new ProcessStartInfo
-                    {
-                        FileName = "python", // system python
-                        Arguments = $"-m venv \"{newVenvPath}\"",
-                        UseShellExecute = false,
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
-                        CreateNoWindow = true
-                    }
-                };
-
-                createVenv.Start();
-                createVenv.WaitForExit();
-
-                if (!File.Exists(newPythonExe))
-                    throw new Exception("Failed to create virtual environment.");
-
-                venvPath = newVenvPath;
-                pythonExe = newPythonExe;
-            }
-
-            // Proceed to run the Python script
-            string quotedMp3s = string.Join(" ", mp3Files.Select(f => $"\"{f}\""));
-            string args = $"\"{scriptPath}\" {quotedMp3s} --device {device} --output \"{outputPath}\" --workers {workers}";
+            // Now your Python script should accept a list file input
+            string args = $"\"{scriptPath}\" --file-list \"{tempListPath}\" --device {device} --output \"{outputPath}\" --batch-size {workers}";
 
             var process = new Process
             {
@@ -150,6 +124,79 @@ namespace Readaloud_Epub3_Creator
             process.WaitForExit();
 
             return string.Join(Environment.NewLine, output);
+        }
+// Experiment uneused
+        /// <summary>
+        /// Runs the Aeneas-based Python transcription alignment script on one audio/text pair using system Python.
+        /// </summary>
+        /// <param name="scriptPath">Path to the aeneas_transcribe.py script.</param>
+        /// <param name="audioFile">Path to the audiobook audio file (e.g., MP3 or WAV).</param>
+        /// <param name="textFile">Path to the text file containing the ebook content.</param>
+        /// <param name="outputPath">Path where the alignment JSON will be written.</param>
+        /// <param name="onProgress">Optional progress callback (0–100).</param>
+        /// <returns>Combined console output (stdout + stderr) as a single string.</returns>
+        public static string RunAeneasAlignment(
+            string scriptPath,
+            string audioFile,
+            string textFile,
+            string outputPath,
+            Action<int>? onProgress = null
+        )
+        {
+            // Use system Python
+            string pythonExe = "python"; // Assumes system Python is in PATH
+
+            if (!File.Exists(scriptPath))
+                throw new FileNotFoundException("Aeneas script not found: " + scriptPath);
+
+            if (!File.Exists(audioFile))
+                throw new FileNotFoundException("Audio file not found: " + audioFile);
+
+            if (!File.Exists(textFile))
+                throw new FileNotFoundException("Text file not found: " + textFile);
+
+            string args = $"\"{scriptPath}\" --audio \"{audioFile}\" --text \"{textFile}\" --output \"{outputPath}\"";
+
+            var outputLog = new List<string>();
+
+            var process = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = pythonExe,
+                    Arguments = args,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                }
+            };
+
+            process.OutputDataReceived += (sender, e) =>
+            {
+                if (e.Data != null)
+                {
+                    // Capture Python progress updates
+                    if (e.Data.StartsWith("PROGRESS:") && int.TryParse(e.Data.Replace("PROGRESS:", ""), out int percent))
+                        onProgress?.Invoke(percent);
+                    else
+                        outputLog.Add(e.Data);
+                }
+            };
+
+            process.ErrorDataReceived += (sender, e) =>
+            {
+                if (e.Data != null)
+                    outputLog.Add("ERR: " + e.Data);
+            };
+
+            process.Start();
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+            process.WaitForExit();
+
+            onProgress?.Invoke(100);
+            return string.Join(Environment.NewLine, outputLog);
         }
 
 

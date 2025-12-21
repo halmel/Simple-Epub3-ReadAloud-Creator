@@ -1,23 +1,10 @@
-
-def safe_print(*args, **kwargs):
-    safe_args = []
-    for a in args:
-        if isinstance(a, str):
-            safe_args.append(a.encode('ascii', errors='ignore').decode())
-        else:
-            safe_args.append(a)
-        print(*safe_args, **kwargs)
-
+import subprocess
 import os
 import sys
-import json
-import subprocess
 def ensure_dependencies():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     req_path = os.path.join(script_dir, "requirements.txt")
 
-
-    # Then install all requirements including torch from requirements.txt
     try:
         subprocess.run(
             [sys.executable, "-m", "pip", "install", "-r", req_path],
@@ -29,206 +16,104 @@ def ensure_dependencies():
         safe_print(e)
         sys.exit(1)
 
-ensure_dependencies()
-import whisper
+def safe_print(*args, **kwargs):
+    safe_args = []
+    for a in args:
+        if isinstance(a, str):
+            safe_args.append(a.encode('ascii', errors='ignore').decode())
+        else:
+            safe_args.append(a)
+    print(*safe_args, **kwargs)
+
+import json
+from pathlib import Path
+from faster_whisper import WhisperModel, BatchedInferencePipeline
 import torch
 from pydub.utils import mediainfo
-from pathlib import Path
-import multiprocessing
-
-import sys
-import io
-import ctypes
-import os
-
-if sys.platform == "win32":
-    ctypes.windll.kernel32.SetConsoleOutputCP(65001)
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 
-
-
-def debug_cuda():
-    safe_print("🛠 CUDA Debugging Info:")
-    try:
-        safe_print(f" - torch.cuda.is_available(): {torch.cuda.is_available()}")
-        safe_print(f" - torch.version.cuda: {torch.version.cuda}")
-        safe_print(f" - torch.backends.cudnn.version(): {torch.backends.cudnn.version()}")
-        safe_print(f" - torch.cuda.device_count(): {torch.cuda.device_count()}")
-        if torch.cuda.is_available():
-            safe_print(f" - torch.cuda.get_device_name(): {torch.cuda.get_device_name(0)}")
-    except Exception as e:
-        safe_print(f" - Error accessing torch.cuda: {e}")
-
-    try:
-        result = subprocess.run(["nvidia-smi"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        if result.returncode == 0:
-            safe_print(" - V nvidia-smi output:\n" + result.stdout)
-        else:
-            safe_print(" - X nvidia-smi error:\n" + result.stderr)
-    except FileNotFoundError:
-        safe_print(" - X nvidia-smi not found. Ensure NVIDIA drivers are installed and in PATH.")
-    except Exception as e:
-        safe_print(f" - Unexpected error running nvidia-smi: {e}")
-
-
+# Utility: get audio duration
 def get_mp3_length(filepath):
     try:
         info = mediainfo(filepath)
         return round(float(info['duration']), 2)
-    except Exception as e:
+    except Exception:
         return None
 
+# Batched transcription using faster-whisper
+def transcribe_files_batched(mp3_paths, device, output_path, batch_size=8, model_size="tiny"):
+    safe_print(f"Loading model '{model_size}' on {device}...")
+    model = WhisperModel(model_size, device=device, compute_type="int8" if device=="cpu" else "float16")
+    batched_model = BatchedInferencePipeline(model=model)
 
-def transcribe_one_file(path, device):
-    model = whisper.load_model("tiny", device=device)
-    audio = whisper.load_audio(path)
-    audio = whisper.pad_or_trim(audio)
-    mel = whisper.log_mel_spectrogram(audio).to(device)
-
-    lang_tup = model.detect_language(mel)
-    lang = lang_tup[0][0] if isinstance(lang_tup, list) else lang_tup[0]
-    language = lang if isinstance(lang, str) else max(lang_tup[1], key=lang_tup[1].get)
-
-    result = model.transcribe(path, language=language, task="transcribe", fp16=(device == "cuda"))
-
-    segments = []
-    for seg in result.get("segments", []):
-        segments.append({
-            "id": seg.get("id"),
-            "start": round(seg.get("start", 0), 2),
-            "end": round(seg.get("end", 0), 2),
-            "text": seg.get("text", "").strip(),
-            "confidence": seg.get("confidence", None)
-        })
-
-    return {
-        "file": os.path.basename(path),
-        "language": language,
-        "length": get_mp3_length(path),
-        "text": result.get("text", "").strip(),
-        "segments": segments
-    }
-
-
-# Top-level function for multiprocessing (to replace the lambda)
-def transcribe_cpu(path):
-    return transcribe_one_file(path, "cpu")
-
-
-def transcribe_files_multicore(mp3_paths, output_path, num_workers):
-    total = len(mp3_paths)
-    transcriptions = []
-
-    with multiprocessing.Pool(processes=num_workers) as pool:
-        for idx, result in enumerate(pool.imap_unordered(transcribe_cpu, mp3_paths), 1):
-            transcriptions.append(result)
-            percent = int(idx * 100 / total)
-            safe_print(f"PROGRESS:{percent}", flush=True)
-
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(transcriptions, f, indent=2, ensure_ascii=False)
-
-    safe_print(f"V Transcription complete. Output written to {output_path}")
-
-
-def transcribe_files(mp3_paths, device_option, output_path, num_workers):
-    if device_option == "auto":
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-    else:
-        device = device_option
-        if device == "cuda" and not torch.cuda.is_available():
-            safe_print("X CUDA was requested but is not available. Starting diagnostics...")
-            debug_cuda()
-            raise RuntimeError("CUDA requested but not available.")
-
-    safe_print(f"Using device: {device}")
-
-    if device == "cpu" and len(mp3_paths) > 1:
-        transcribe_files_multicore(mp3_paths, output_path, num_workers)
-        return
-
-    # Single-thread fallback or CUDA path
-    model = whisper.load_model("tiny", device=device)
     transcriptions = []
 
     total = len(mp3_paths)
     for idx, path in enumerate(mp3_paths):
-        safe_print(f"Transcribing: {os.path.basename(path)}")
+        safe_print(f"Transcribing [{idx+1}/{total}]: {os.path.basename(path)}")
 
-        audio = whisper.load_audio(path)
-        audio = whisper.pad_or_trim(audio)
-        mel = whisper.log_mel_spectrogram(audio).to(device)
+        segments, info = batched_model.transcribe(path, batch_size=batch_size)
+        segments = list(segments)  # Run transcription
 
-        lang_tup = model.detect_language(mel)
-        lang = lang_tup[0][0] if isinstance(lang_tup, list) else lang_tup[0]
-        language = lang if isinstance(lang, str) else max(lang_tup[1], key=lang_tup[1].get)
-
-        result = model.transcribe(path, language=language, task="transcribe", fp16=(device == "cuda"))
-
-        segments = []
-        for seg in result.get("segments", []):
-            segments.append({
-                "id": seg.get("id"),
-                "start": round(seg.get("start", 0), 2),
-                "end": round(seg.get("end", 0), 2),
-                "text": seg.get("text", "").strip(),
-                "confidence": seg.get("confidence", None)
+        segment_data = []
+        for seg in segments:
+            segment_data.append({
+                "start": round(seg.start, 2),
+                "end": round(seg.end, 2),
+                "text": seg.text.strip()
             })
 
         transcriptions.append({
             "file": os.path.basename(path),
-            "language": language,
+            "language": info.language,
+            "language_probability": info.language_probability,
             "length": get_mp3_length(path),
-            "text": result.get("text", "").strip(),
-            "segments": segments
+            "text": "".join([s["text"] for s in segment_data]),
+            "segments": segment_data
         })
 
-        percent = int((idx + 1) * 100 / total)
-        safe_print(f"PROGRESS:{percent}", flush=True)
-
+    # Save to JSON
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(transcriptions, f, indent=2, ensure_ascii=False)
 
-    safe_print(f"V Transcription complete. Output written to {output_path}")
+    safe_print(f"✅ Transcription complete. Output written to {output_path}")
 
 
 def main():
     import argparse
-
-    # Windows UTF-8 console output fix
-    if sys.platform == "win32":
-        import ctypes
-        ctypes.windll.kernel32.SetConsoleOutputCP(65001)
-
     parser = argparse.ArgumentParser()
-    parser.add_argument("mp3_files", nargs="+", help="MP3 file paths")
-    parser.add_argument("--device", choices=["cpu", "cuda", "auto"], default="auto", help="Device to use for transcription")
-    parser.add_argument("--output", default="transcriptions.json", help="Path to output transcript JSON file")
-    parser.add_argument("--workers", type=int, default=max(1, multiprocessing.cpu_count() // 2),
-                        help="Number of worker processes to use (CPU only)")
-
+    parser.add_argument("--file-list", help="Path to a text file containing MP3 paths")
+    parser.add_argument("mp3_files", nargs="*", help="MP3 file paths (ignored if --file-list is used)")
+    parser.add_argument("--device", choices=["cpu", "cuda", "auto"], default="auto", help="Device to use")
+    parser.add_argument("--output", default="transcriptions.json", help="Output JSON file path")
+    parser.add_argument("--batch-size", type=int, default=8, help="Batch size for CPU transcription")
+    parser.add_argument("--model-size", default="small", help="Model size (tiny, small, medium, large-v2, etc.)")
     args = parser.parse_args()
 
-    mp3_files = args.mp3_files
-    device_option = args.device
-    output_path = args.output
-    num_workers = args.workers
+    # Load files
+    if args.file_list:
+        with open(args.file_list, "r", encoding="utf-8") as f:
+            mp3_files = [line.strip() for line in f if line.strip()]
+    else:
+        mp3_files = args.mp3_files
+
+    if not mp3_files:
+        safe_print("❌ No MP3 files provided.")
+        sys.exit(1)
 
     for f in mp3_files:
         if not Path(f).is_file():
-            safe_print(f"X Error: '{f}' does not exist.")
+            safe_print(f"❌ Error: '{f}' does not exist.")
             sys.exit(1)
 
-    try:
-        transcribe_files(mp3_files, device_option, output_path, num_workers)
-    except Exception as e:
-        # Removed emoji here to avoid encoding issues on Windows
-        safe_print("Transcription failed:", str(e))
-        sys.exit(1)
+    # Decide device
+    device = "cuda" if (args.device=="auto" and torch.cuda.is_available()) else args.device
+    safe_print(f"Using device: {device}")
+
+    # Run batched transcription
+    transcribe_files_batched(mp3_files, device, args.output, batch_size=args.batch_size, model_size=args.model_size)
 
 
 if __name__ == "__main__":
-    multiprocessing.freeze_support()
+    ensure_dependencies()
     main()

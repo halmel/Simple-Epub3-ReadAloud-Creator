@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <PackageReference Include="EpubSharp.dll" Version="1.1.5" />
+    <PackageReference Include="F23.StringSimilarity" Version="7.0.0" />
     <PackageReference Include="FuzzySearch.Net" Version="1.1.0" />
     <PackageReference Include="FuzzySharp" Version="2.0.2" />
     <PackageReference Include="HtmlAgilityPack" Version="1.12.1" />

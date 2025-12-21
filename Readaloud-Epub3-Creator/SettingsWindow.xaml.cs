@@ -6,7 +6,6 @@ using ModernWpf.Controls;
 using Microsoft.Win32;
 using System.Windows.Controls;
 using System.Runtime;
-using System.Windows.Forms;
 
 
 namespace Readaloud_Epub3_Creator

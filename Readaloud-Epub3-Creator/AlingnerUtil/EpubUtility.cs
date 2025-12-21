@@ -1,23 +1,19 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Drawing;
-using System.IO;
-using System.Linq;
+﻿using EpubSharp;
 using HtmlAgilityPack;
-using EpubSharp;
-using System.Text.RegularExpressions;
-using System.Text.Json;
-using static Readaloud_Epub3_Creator.TranscriptClass;
-using System.Text;
 using System.Globalization;
+using System.IO;
 using System.IO.Compression;
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Xml;
+using static Readaloud_Epub3_Creator.TranscriptClass;
 
 
 // Rebuild the EPUB by replacing HTML content with edited HtmlDocuments
 
-namespace Readaloud_Epub3_Creator 
-{ 
+namespace Readaloud_Epub3_Creator
+{
     public class EpubUtility
     {
         // Loads an EPUB and extracts all HTML content as HtmlDocuments
@@ -371,7 +367,7 @@ namespace Readaloud_Epub3_Creator
                 });
         }
         public static void ApplyTextSegmentsToHtmlDocuments(
-             Dictionary<string, HtmlDocument> htmlDocs,
+            Dictionary<string, HtmlDocument> htmlDocs,
             List<HtmlTextSegment> segments)
         {
             foreach (var segment in segments)
@@ -379,10 +375,23 @@ namespace Readaloud_Epub3_Creator
                 if (!htmlDocs.TryGetValue(segment.FileName, out HtmlDocument doc))
                     continue;
 
-                HtmlNode oldDoc = doc.DocumentNode.Clone();
-                var parentNode = doc.DocumentNode.SelectSingleNode(segment.ParentXPath);
+                // Ensure XPath is valid
+                string parentXPath = segment.ParentXPath;
+                if (string.IsNullOrWhiteSpace(parentXPath))
+                    continue;
+
+                // Sanitize bad xpaths like "/#document"
+                if (parentXPath.StartsWith("/#document"))
+                {
+                    parentXPath = parentXPath.Replace("/#document", "");
+                    if (string.IsNullOrEmpty(parentXPath))
+                        parentXPath = "/"; // fallback to root
+                }
+
+                var parentNode = doc.DocumentNode.SelectSingleNode(parentXPath);
                 if (parentNode == null)
                     continue;
+
                 int textIndex = -1;
                 for (int i = 0, count = 0; i < parentNode.ChildNodes.Count; i++)
                 {
@@ -397,10 +406,10 @@ namespace Readaloud_Epub3_Creator
                         }
                         count++;
                     }
-
                 }
             }
         }
+
 
 
 
@@ -418,6 +427,8 @@ namespace Readaloud_Epub3_Creator
 
 
             public int SentenceIndex { get; set; } = -1;
+
+            public int MaxSentanceIndex = -1;
 
             public List<Segment> LinkedSegments { get; set; } = new();
 
@@ -456,9 +467,9 @@ namespace Readaloud_Epub3_Creator
                 return sb.ToString();
             }
         }
-      
-        public static void GenerateSplitSmilFilesGroupedByFile(List<WordSegment> words,
-             string outputDirectory = "output")
+
+        public static void GenerateSmilFiles(List<WordSegment> words,
+                 string outputDirectory = "output")
         {
             string audioFolder = "../Audio/";
             Directory.CreateDirectory(outputDirectory);
@@ -531,7 +542,7 @@ namespace Readaloud_Epub3_Creator
                 smilContent.AppendLine($"    <seq id=\"id_overlay_{Path.GetFileNameWithoutExtension(fileName)}\" epub:textref=\"{htmlRef}\" epub:type=\"chapter\">");
 
                 var bySegmentSet = fileGroup
-                    .GroupBy(w => string.Join(";", w.LinkedSegments.Select(s => $"{s.fileId}_{s.id}")))
+                    .GroupBy(w => string.Join(";", w.LinkedSegments.Select(s => $"{s.fileId}_{s.IndexInList}")))
                     .ToList();
 
 
@@ -579,24 +590,46 @@ namespace Readaloud_Epub3_Creator
                     var lastSeg = allSegments.OrderBy(s => s.IndexInList).Last();
 
                     string audioSrc = $"{audioFolder}{firstSeg.fileId}";
+                    if (PreviousEndTime == 0)
+                    {
+                        PreviousEndTime = firstSeg.start;
+                    }
                     double clipBegin = PreviousEndTime;
 
-                    double clipEnd = lastSeg.end;
-                    if (segmentGroup == bySegmentSet.Last())
-                    {
-                        clipEnd = FileEnd;
-                    }
+                    double clipEnd = 0;
 
-                    double difference = lastSeg.end - clipBegin;
-                    double[] doubles = new double[sentenceGroups.Count];
+                    double totalChars = sentenceGroups.Sum(g => g.Sum(ws => (ws.Word ?? string.Empty).Length));
 
-                    if (sentenceGroups[0].Key != -1)
-                    {
-                        doubles = CalculateDifferences(sentenceGroups, difference);
-                    }
+                    double overallStart = sentenceGroups.First().First().LinkedSegments.First().start;
+                    double overallEnd = sentenceGroups.Last().Last().LinkedSegments.Last().end;
+                    double totalAvailableSpan = overallEnd - overallStart;
+
                     for (int i = 0; i < sentenceGroups.Count; i++)
                     {
-                        var group = sentenceGroups[i];
+                        IGrouping<int, WordSegment> group = sentenceGroups[i];
+                        double groupChars = group.Sum(ws => (ws.Word ?? string.Empty).Length);
+
+                        if (sentenceGroups.Count == 1)
+                        {
+                            if (clipEnd != 0)
+                            {
+                                clipBegin = clipEnd;
+
+                            }
+                            clipEnd = group.Last().LinkedSegments.Last().end;
+
+                        }
+                        else
+                        {
+                            if (clipEnd != 0)
+                            {
+                                clipBegin = clipEnd;
+
+                            }
+                            clipEnd = clipBegin + totalAvailableSpan * (groupChars /totalChars);
+                        }
+
+
                         if (group.Key == -1)
                         {
                             string textRef = $"../{fileName}#id-sentence{parGlobalCounter}";
@@ -605,17 +638,15 @@ namespace Readaloud_Epub3_Creator
                             smilContent.AppendLine($"        <text src=\"{textRef}\"/>");
                             smilContent.AppendLine($"        <audio src=\"{audioSrc}\" clipBegin=\"{ToSmilTime(clipBegin)}\" clipEnd=\"{ToSmilTime(clipEnd)}\"/>");
                             smilContent.AppendLine("      </par>");
+
                         }
                         else
                         {
                             string textRef = $"../{fileName}#id-sentence{parGlobalCounter}-{group.Key}";
-
-                            clipEnd = clipBegin + doubles[i];
                             smilContent.AppendLine($"      <par id=\"sentence{parGlobalCounter}\">");
                             smilContent.AppendLine($"        <text src=\"{textRef}\"/>");
                             smilContent.AppendLine($"        <audio src=\"{audioSrc}\" clipBegin=\"{ToSmilTime(clipBegin)}\" clipEnd=\"{ToSmilTime(clipEnd)}\"/>");
                             smilContent.AppendLine("      </par>");
-                            clipBegin = clipEnd;
                         }
                     }
                     PreviousEndTime = clipEnd;
@@ -634,52 +665,44 @@ namespace Readaloud_Epub3_Creator
             Console.WriteLine($"[DONE] SMIL generation complete: {groupedByFile.Count} file(s), {parGlobalCounter} <par> blocks total.");
         }
 
-
-
-        public static double[] CalculateDifferences(List<IGrouping<int, WordSegment>> sentenceGroups, double difference)
+        public static void NormalizeSegmentsToFullMp3Length(List<WordSegment> words)
         {
-            // Total length of all words combined
-            int totalLength = sentenceGroups
-                .SelectMany(g => g)
-                .Sum(ws => ws.Word.Length);
+            // Find all unique fileIds across all linked segments
+            var allSegments = words.SelectMany(w => w.LinkedSegments).ToList();
+            var fileGroups = allSegments.GroupBy(s => s.fileId);
 
-            int count = sentenceGroups.Count;
-            double[] results = new double[count];
-
-            if (totalLength == 0)
+            foreach (var fileGroup in fileGroups)
             {
-                // If total length is zero, just divide difference equally
-                double equalValue = difference / count;
-                for (int i = 0; i < count; i++)
+                var segments = fileGroup.OrderBy(s => s.start).ToList();
+                if (segments.Count == 0)
+                    continue;
+
+                var firstSeg = segments.First();
+                var lastSeg = segments.Last();
+
+                // 🔹 Normalize first and last
+                double fileLength = lastSeg.fileLength;
+                firstSeg.start = 0;
+                lastSeg.end = fileLength;
+
+                // 🔹 Update all references in WordSegments that point to these
+                foreach (var w in words)
                 {
-                    results[i] = equalValue;
+                    for (int i = 0; i < w.LinkedSegments.Count; i++)
+                    {
+                        var seg = w.LinkedSegments[i];
+                        if (seg.fileId == fileGroup.Key)
+                        {
+                            // If matches first segment id → enforce new start
+                            if (seg.IndexInList == firstSeg.IndexInList)
+                                seg.start = 0;
+                            // If matches last segment id → enforce new end
+                            if (seg.IndexInList == lastSeg.IndexInList)
+                                seg.end = fileLength;
+                        }
+                    }
                 }
-                return results;
             }
-
-            // Calculate the length sum for each sentence group
-            double[] groupLengths = new double[count];
-            for (int i = 0; i < count; i++)
-            {
-                groupLengths[i] = sentenceGroups[i].Sum(ws => ws.Word.Length);
-            }
-
-            // Sum of all groupLengths should equal totalLength, but just in case
-            double sumGroupLengths = groupLengths.Sum();
-
-            // Calculate results proportional to groupLengths, scaled by 'difference'
-            for (int i = 0; i < count; i++)
-            {
-                results[i] = groupLengths[i] / sumGroupLengths * difference;
-            }
-
-            // Due to floating point precision, sum(results) might be slightly off difference.
-            // Adjust the last element to fix the sum exactly.
-            double currentSum = results.Sum();
-            double correction = difference - currentSum;
-            results[count - 1] += correction;
-
-            return results;
         }
 
 
@@ -688,9 +711,12 @@ namespace Readaloud_Epub3_Creator
 
         public static string ToSmilTime(double timeInSeconds)
         {
-            // Formats time using comma as decimal separator for SMIL 3.0 compatibility
-            return timeInSeconds.ToString("0.###", new CultureInfo("fr-FR")) + "s";
+            timeInSeconds = Math.Round(timeInSeconds, 3, MidpointRounding.AwayFromZero);
+            return timeInSeconds
+                .ToString("0.###", CultureInfo.InvariantCulture) + "s";
         }
+
+
 
 
 

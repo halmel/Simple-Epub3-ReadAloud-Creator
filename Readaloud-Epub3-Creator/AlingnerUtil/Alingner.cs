@@ -1,4 +1,6 @@
-﻿using FuzzySharp;
+﻿using F23.StringSimilarity;
+using FuzzySharp;
+using System.Collections.Concurrent;
 using System.IO;
 using System.Text;
 using System.Text.Json;
@@ -9,7 +11,7 @@ namespace Readaloud_Epub3_Creator
 {
     internal class Alingner
     {
-
+        public static F23.StringSimilarity.NGram l = new NGram(2);
 
         public static void AlignTranscriptToWords(ref List<WordSegment> words, List<Segment> segments, string wordPath, int anchorCount = 30)
         {
@@ -91,8 +93,9 @@ namespace Readaloud_Epub3_Creator
                 int searchWindow = (int)(baseWindow * 1.5) + extraWindow;
 
                 var match = TrySlowMatch(
-                    segments, segIdx, words, ref tempPos,
+                    segments, ref segIdx, words, ref tempPos,
                     hardDistanceLimit: searchWindow,
+                    isAnchor: true,
                     scoreThreshold: 70
                 );
 
@@ -151,111 +154,97 @@ namespace Readaloud_Epub3_Creator
 
 
             // Align between anchors
-            for (int a = 0; a < anchors.Count - 1; a++)
+
+            // Align between anchors (multithreaded)
+            var parallelResult = new ConcurrentDictionary<Segment, List<WordSegment>>();
+
+            Parallel.ForEach(
+                Enumerable.Range(0, anchors.Count - 1),
+        new ParallelOptions
+        {
+            MaxDegreeOfParallelism = Environment.ProcessorCount
+        },
+        a =>
+        {
+            var (startSeg, startWords, _) = anchors[a];
+            var (endSeg, endWords, _) = anchors[a + 1];
+
+            if (startSeg >= 0)
+                parallelResult[segments[startSeg]] = anchors[a].match;
+
+            int segCount = endSeg - startSeg - 1;
+            if (segCount <= 0)
+                return;
+
+            var subSegments = segments.GetRange(startSeg + 1, segCount);
+            var subWords = words.GetRange(startWords, endWords - startWords);
+            int localPos = 0;
+
+            for (int j = 0; j < subSegments.Count; j++)
             {
-                var (startSeg, startWords, _) = anchors[a];
-                var (endSeg, endWords, _) = anchors[a + 1];
+                var seg = subSegments[j];
+                int globalIdx = startSeg + 1 + j;
 
-                if (startSeg >= 0)
-                    result[segments[startSeg]] = anchors[a].match;
-
-                int segCount = endSeg - startSeg - 1;
-                if (segCount <= 0) continue;
-
-                var subSegments = segments.GetRange(startSeg + 1, segCount);
-                var subWords = words.GetRange(startWords, endWords - startWords);
-                int localPos = 0;
-
-
-                for (int j = 0; j < subSegments.Count; j++)
+                // --- FAST MATCH ---
+                var fast = TryFastMatch(subSegments, j, subWords, localPos, scoreThreshold, maxLookahead);
+                if (fast != null && fast.TryGetValue(seg, out var fMatch))
                 {
-                    var seg = subSegments[j];
-                    int globalIdx = startSeg + 1 + j;
-
-                    // --- FAST MATCH ---
-                    var fast = TryFastMatch(subSegments, j, subWords, localPos, scoreThreshold, maxLookahead);
-                    if (fast != null && fast.TryGetValue(seg, out var fMatch))
-                    {
-                        result[seg] = fMatch;
-
-                        LogOutcome(
-                            globalIdx,
-                            LogLevel.Green,
-                            "FastMatch success",
-                            localPos,
-                            subWords,
-                            seg.text,
-                            fMatch
-                        );
-
-                        localPos += fMatch.Count;
-                        continue;
-                    }
-
-                    // --- SLOW MATCH with SAFE REFERENCE HANDLING & ROBUST CORRECTION ---
-                    int lookbackLimit = 100;
-                    int backwardPos = Math.Max(0, localPos - lookbackLimit);
-                    int tentativePos = backwardPos;
-
-                    var slow = TrySlowMatch(
-                        subSegments,
-                        j,
-                        subWords,
-                        ref tentativePos, // temp, not actual localPos
-                        hardDistanceLimit: 1000,
-                        scoreThreshold
-                    );
-
-                    var hasSlowMatch = slow != null && slow.Count > 0;
-                    var level = hasSlowMatch ? LogLevel.Yellow : LogLevel.Red;
-                    var msg = hasSlowMatch ? "SlowMatch fallback" : "Match skipped";
-
-                    // --- Targeted Cleanup of Previous Entries ---
-                    if (hasSlowMatch && tentativePos < localPos)
-                    {
-                        int matchStart = startWords + tentativePos;
-                        int matchEnd = matchStart + slow.Count;
-
-                        var toRemove = result
-                            .Where(kvp => kvp.Value.Any(ws =>
-                                ws.IndexInList >= matchStart && ws.IndexInList < matchEnd))
-                            .Select(kvp => kvp.Key)
-                            .ToList();
-
-                        foreach (var rem in toRemove)
-                        {
-                            result.Remove(rem);
-                            LogOutcome(
-                                segments.IndexOf(rem),
-                                LogLevel.Yellow,
-                                "Removed misaligned segment due to backward correction",
-                                tentativePos,
-                                subWords,
-                                rem.text,
-                                null
-                            );
-                        }
-                    }
-
-                    if (hasSlowMatch)
-                    {
-                        result[seg] = slow;
-                        localPos = tentativePos; // Advance position only on success
-                    }
+                    parallelResult[seg] = fMatch;
 
                     LogOutcome(
                         globalIdx,
-                        level,
-                        msg,
-                        tentativePos,
+                        LogLevel.Green,
+                        "FastMatch success",
+                        localPos,
                         subWords,
                         seg.text,
-                        slow
+                        fMatch
                     );
 
-
+                    localPos += fMatch.Count;
+                    continue;
                 }
+
+                // --- SLOW MATCH ---
+                int lookbackLimit = 100;
+                int backwardPos = Math.Max(0, localPos - lookbackLimit);
+                int tentativePos = backwardPos;
+
+                var slow = TrySlowMatch(
+                subSegments,
+                ref j,
+                subWords,
+                ref tentativePos,
+                hardDistanceLimit: 1000,
+                scoreThreshold
+            );
+
+                var hasSlowMatch = slow != null && slow.Count > 0;
+                var level = hasSlowMatch ? LogLevel.Yellow : LogLevel.Red;
+                var msg = hasSlowMatch ? "SlowMatch fallback" : "Match skipped";
+
+                if (hasSlowMatch)
+                {
+                    parallelResult[seg] = slow;
+                    localPos = tentativePos;
+                }
+
+                LogOutcome(
+                globalIdx,
+                level,
+                msg,
+                tentativePos,
+                subWords,
+                seg.text,
+                slow
+            );
             }
+        }
+    );
+
+            // Merge results after parallel work
+             result = parallelResult.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+
 
             // Save logs as JSON
             var options = new JsonSerializerOptions { WriteIndented = true };
@@ -264,6 +253,8 @@ namespace Readaloud_Epub3_Creator
 
             return result;
         }
+
+        private static readonly object _logLock = new object();
 
         private static void LogOutcome(
             int segmentIndex,
@@ -282,7 +273,7 @@ namespace Readaloud_Epub3_Creator
                 ? string.Concat(matchedWords.Select(w => w.Word))
                 : string.Empty;
 
-            _logs.Add(new LogEntry
+            var entry = new LogEntry
             {
                 SegmentIndex = segmentIndex,
                 StartPos = wordPos,
@@ -291,8 +282,15 @@ namespace Readaloud_Epub3_Creator
                 ContextSnippet = snippet,
                 MachedText = matchedText,
                 TargetText = targetText
-            });
+            };
+
+            // Thread-safe write
+            lock (_logLock)
+            {
+                _logs.Add(entry);
+            }
         }
+
 
 
 
@@ -345,24 +343,80 @@ namespace Readaloud_Epub3_Creator
         private static (int score, int length) FindBestMatchAt(
             List<WordSegment> words,
             int pos,
-            string targetText)
+            string targetText,
+            int minCommonBigrams = 100)
         {
-            int bestScore = 0, bestLen = 0;
+            var results = new List<(int score, int length, int diff)>();
+            string normTarget = Normalize(targetText);
+            var targetBigrams = GetCharacterBigrams(normTarget);
+            StringBuilder sb = new StringBuilder();
+
+            int consecutiveIncrease = 0;
+            int prevDiff = -1;
+
             for (int len = 1; pos + len <= words.Count; len++)
             {
-                string candidate = ConcatWords(words, pos, len);
-                int score = ScoreStringSimilarity(candidate, targetText);
+                sb.Append(words[pos + len - 1].Word);
+                string candidate = Normalize(sb.ToString());
 
+                int diff = Math.Abs(candidate.Length - normTarget.Length);
+
+                // Track consecutive increases
+                if (prevDiff != -1 && diff > prevDiff)
+                    consecutiveIncrease++;
+                else
+                    consecutiveIncrease = 0;
+
+                if (consecutiveIncrease >= 3)
+                    break;
+
+                prevDiff = diff;
+
+                int score = (int)(l.Distance(candidate, normTarget) * 100);
+                results.Add((score, len, diff));
+            }
+
+            // Order by smallest difference first
+            var topResults = results.OrderBy(r => r.diff)
+                                    .ThenByDescending(r => r.score) // optional tie-breaker by score
+                                    .Take(2)
+                                    .ToList();
+            int bestScore = 0;
+            int bestLen = 0;
+            foreach (var res in topResults)
+            {
+                string candidate = Normalize(ConcatWords(words, pos, res.length));
+
+
+                // FILTER 2: n‑gram overlap
+                var candBigrams = GetCharacterBigrams(candidate);
+                int common = candBigrams.Intersect(targetBigrams).Count();
+                if (common < minCommonBigrams) continue;
+
+                // Now expensive full fuzz ratio
+                int score = Fuzz.Ratio(candidate, normTarget);
                 if (score > bestScore)
                 {
                     bestScore = score;
-                    bestLen = len;
+                    bestLen = res.length;
+                    if (bestScore == 100) break;  // perfect match early exit
                 }
-                if (candidate.Length > targetText.Length + 10)
-                    break;
             }
+
             return (bestScore, bestLen);
         }
+
+
+        public static IEnumerable<string> GetCharacterBigrams(string s)
+        {
+            if (String.IsNullOrEmpty(s) || s.Length < 2)
+                yield break;
+            for (int i = 0; i < s.Length - 1; i++)
+            {
+                yield return s.Substring(i, 2);
+            }
+        }
+
 
         private static bool TryLookahead(
             List<Segment> segments,
@@ -419,117 +473,239 @@ namespace Readaloud_Epub3_Creator
         // === MAIN ENTRY ===
         private static List<WordSegment> TrySlowMatch(
             List<Segment> segments,
-            int segmentIndex,
+            ref int segmentIndex,
             List<WordSegment> wordStream,
             ref int wordStartPos,
             int hardDistanceLimit,
             int scoreThreshold,
-            int batchSize = 600)
+            bool isAnchor = false)
         {
             var segment = segments[segmentIndex];
             int originalStart = wordStartPos;
             int searchLimit = Math.Min(wordStream.Count, originalStart + hardDistanceLimit);
 
-            int bestScore = 0;
-            int bestLen = 0;
-            int bestPos = originalStart;
+            // 🔍 Use a longer target text for initial approximate positioning
+            string targetText = BuildTargetText(segments, segmentIndex, minLength: 150);
+            (int start, int end, int score)? region;
 
-            int stagnantCycles = 0;
-
-            for (int batchStart = originalStart; batchStart < searchLimit; batchStart += batchSize/2)
+            if (hardDistanceLimit > 1000)
             {
-                int lengthThreshold = 150;
-                string targetText = segment.text;
-                int nextIndex = segmentIndex + 1;
-
-                while (targetText.Length < lengthThreshold && nextIndex < segments.Count)
-                {
-                    targetText += segments[nextIndex].text;
-                    nextIndex++;
-                }
-
-                string x = ConcatWords(wordStream, batchStart, batchSize);
-                var f = Fuzz.PartialRatio(targetText, x);
-                if (f > 55)
-                {
-                    bool improved = false;
-
-                    for (int i = 0; i < batchSize && batchStart + i < searchLimit; i++)
-                    {
-                        int pos = batchStart + i;
-                        var (score, len) = FindBestMatchAt(wordStream, pos, targetText);
-                        if (score > bestScore)
-                        {
-                            bestScore = score;
-                            bestLen = len;
-                            bestPos = pos;
-                            improved = true;
-
-                            if (score >= 99)
-                            {
-                                (bestScore, bestLen) = FindBestMatchAt(wordStream, bestPos, segment.text);
-                                wordStartPos = bestPos + bestLen;
-                                return wordStream.Skip(bestPos).Take(bestLen).ToList(); // Early exit
-                            }
-                        }
-                    }
-
-                    // Track stagnation
-                    if (!improved)
-                    {
-                        stagnantCycles++;
-
-                        // Early exit condition
-                        if (bestScore >= scoreThreshold && stagnantCycles >= 10)
-                        {
-                            Console.WriteLine("Early exit due to stagnation.");
-                            (bestScore, bestLen) = FindBestMatchAt(wordStream, bestPos, segment.text);
-                            wordStartPos = bestPos + bestLen;
-                            return wordStream.Skip(bestPos).Take(bestLen).ToList();
-                        }
-                    }
-                    else
-                    {
-                        stagnantCycles = 0;
-                    }
-                }
-
-
-                // If best score is acceptable-ish, stop scanning and attempt fallback
-                if (bestScore >= scoreThreshold - 10)
-                {
-                    (bestScore, bestLen) = FindBestMatchAt(wordStream, bestPos, segment.text);
-                    var rescue = TryFastMatch(
-                        segments,
-                        segmentIndex + 1,
-                        wordStream,
-                        bestPos + bestLen,
-                        scoreThreshold,
-                        maxLookahead: 2);
-
-                    if (rescue == null)
-                    {
-                        return null;
-                    }
-                    else
-                    {
-                        bestScore = bestScore + 15;
-                        continue;
-                    }
-
-
-                }
+                region = SelectPromisingRegionIndices(wordStream, targetText, originalStart, searchLimit);
+                if (region == null)
+                    return null;
+            }
+            else
+            {
+                region = (wordStartPos, wordStartPos + hardDistanceLimit, 100);
             }
 
-            // Hard reject
-            if (bestScore < scoreThreshold || bestLen == 0)
-            {
+            var (regionStart, regionEnd, regionScore) = region.Value;
+
+            if (regionScore < 40) // fallback: region too weak
                 return null;
+
+            // 🎯 Focus scanning within the promising region
+            var (bestPos, bestLen, bestScore) = FocusScanRegion(wordStream, regionStart, regionEnd, segment, scoreThreshold);
+
+            // 🧠 Anchor refinement for the next segment
+            if (isAnchor)
+            {
+                int nextSegmentIndex = segmentIndex + 1;
+                if (nextSegmentIndex < segments.Count)
+                {
+                    var (nextPos, nextLen, nextScore) = FocusScanRegion(wordStream, bestPos, regionEnd, segments[nextSegmentIndex], scoreThreshold);
+                    if (nextScore > bestScore + 5)
+                    {
+                        bestPos = nextPos;
+                        segmentIndex = nextSegmentIndex;
+                        bestScore = nextScore;
+                        bestLen = nextLen;
+                    }
+                }
             }
-            (bestScore, bestLen) = FindBestMatchAt(wordStream, bestPos, segment.text);
+            else
+            {
+                int nextSegmentIndex = segmentIndex + 1;
+                if (nextSegmentIndex < segments.Count)
+                {
+                    var (nextPos, nextLen, nextScore) = FocusScanRegion(wordStream, bestPos, regionEnd, segments[nextSegmentIndex], scoreThreshold);
+                    if (nextScore > bestScore + 5)
+                    {
+                        bestScore = nextScore;
+                        bestLen = nextPos - bestPos;
+                    }
+                }
+            }
+
+            // ✅ Final check: only return if score is high enough
+            if (bestScore < scoreThreshold || bestLen == 0)
+                return null;
+
             wordStartPos = bestPos + bestLen;
             return wordStream.Skip(bestPos).Take(bestLen).ToList();
         }
+
+        // 🎯 Focus scanning within the promising region
+        private static (int bestPos, int bestLen, int bestScore) FocusScanRegion(
+            List<WordSegment> wordStream,
+            int regionStart,
+            int regionEnd,
+            Segment segment,
+            int scoreThreshold)
+        {
+            int bestScore = 0;
+            int bestLen = 0;
+            int bestPos = regionStart;
+            int stagnantCycles = 0;
+
+            for (int pos = regionStart; pos < regionEnd; pos++)
+            {
+                var (score, len) = FindBestMatchAt(wordStream, pos, segment.text);
+
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestLen = len;
+                    bestPos = pos;
+                    stagnantCycles = 0;
+
+                    if (score >= 99) // perfect match
+                        break;
+                }
+                else
+                {
+                    stagnantCycles++;
+                    if (bestScore >= scoreThreshold && stagnantCycles >= 10)
+                        break;
+                }
+            }
+
+            return (bestPos, bestLen, bestScore);
+        }
+
+
+
+
+
+        private static string BuildTargetText(List<Segment> segments, int startIndex, int minLength)
+        {
+            string text = segments[startIndex].text;
+            int next = startIndex + 1;
+
+            while (text.Length < minLength && next < segments.Count)
+            {
+                text += segments[next].text;
+                next++;
+            }
+
+            return text;
+        }
+
+        private static (int start, int end, int score)? SelectPromisingRegionIndices(
+            List<WordSegment> wordStream,
+            string targetText,
+            int startIndex,
+            int endIndex,
+            int threshold = 85,
+            int depth = 10,
+            int minSize = 150)
+        {
+            if (depth == 0 || endIndex - startIndex < minSize)
+            {
+                string text = ConcatWords(wordStream, startIndex, endIndex - startIndex);
+                int score = Fuzz.WeightedRatio(targetText, text);
+                return (startIndex, endIndex, score);
+            }
+
+            int mid = (startIndex + endIndex) / 2;
+            int q1 = startIndex + (endIndex - startIndex) / 4;
+            int q3 = startIndex + 3 * (endIndex - startIndex) / 4;
+
+            var regions = new (int start, int end)[]
+            {
+        (startIndex, mid),
+        (q1, q3),
+        (mid, endIndex)
+            };
+
+            int bestScore = 0;
+            int bestStart = startIndex, bestEnd = endIndex;
+
+            foreach (var (s, e) in regions)
+            {
+                string text = ConcatWords(wordStream, s, e - s);
+                int score = Fuzz.WeightedRatio(targetText, text);
+
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestStart = s;
+                    bestEnd = e;
+                }
+            }
+
+            //if (bestScore < threshold - 10)
+            //    return (bestStart, bestEnd, bestScore);
+            if (startIndex == bestStart && endIndex == bestEnd)
+            {
+                return (bestStart, bestEnd, bestScore);
+            }
+            // Recursive refinement
+            var deeper = SelectPromisingRegionIndices(wordStream, targetText, bestStart, bestEnd, threshold, depth - 1, minSize);
+            if (deeper.HasValue && deeper.Value.score > bestScore)
+                return deeper;
+
+            return (bestStart, bestEnd, bestScore);
+        }
+
+
+        private static (string region, int score) QuickRegionSearch(
+            string target,
+            string text,
+            int threshold,
+            int depth,
+            int minSize)
+        {
+            if (depth == 0 || text.Length < minSize)
+                return (text, Fuzz.PartialRatio(target, text));
+
+            int mid = text.Length / 2;
+            int q1 = text.Length / 4;
+            int q3 = (3 * text.Length) / 4;
+
+            var regions = new[]
+            {
+        text[..mid],
+        text[q1..q3],
+        text[mid..]
+    };
+
+            int bestScore = 0;
+            string bestRegion = text;
+
+            foreach (var region in regions)
+            {
+                int score = Fuzz.PartialRatio(target, region);
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestRegion = region;
+                }
+            }
+
+            // Stop early if all scores are low
+            if (bestScore < threshold - 10)
+                return (bestRegion, bestScore);
+
+            // Recurse deeper into best region
+            var (deeperRegion, deeperScore) = QuickRegionSearch(target, bestRegion, threshold, depth - 1, minSize);
+            return deeperScore > bestScore ? (deeperRegion, deeperScore) : (bestRegion, bestScore);
+        }
+
+
+
+
+
 
 
 
