@@ -47,19 +47,19 @@ namespace Readaloud_Epub3_Creator
                 var exeDir = AppDomain.CurrentDomain.BaseDirectory;
 
                 // Try path relative to exeDir (LatestRelease sibling)
-                var candidatePath = Path.GetFullPath(Path.Combine(exeDir, @"..\..\Transcriber\transcriber.py"));
+                var candidatePath = Path.GetFullPath(Path.Combine(exeDir, @"..\..\Transcriber"));
                 if (File.Exists(candidatePath))
                     return candidatePath;
 
                 // Try path relative to Debug/Release build output (YourProjectFolder\bin\Debug\)
                 // exeDir would be: ...\YourProjectFolder\bin\Debug\netX\
                 // Go up 4 levels to MyAppFolder, then Transcriber
-                candidatePath = Path.GetFullPath(Path.Combine(exeDir, @"..\..\..\..\..\Transcriber\transcriber.py"));
+                candidatePath = Path.GetFullPath(Path.Combine(exeDir, @"..\..\..\..\..\Transcriber"));
                 if (File.Exists(candidatePath))
                     return candidatePath;
 
                 // Fallback to the LatestRelease sibling Transcriber folder by default
-                return Path.GetFullPath(Path.Combine(exeDir, @"..\Transcriber\transcriber.py"));
+                return Path.GetFullPath(Path.Combine(exeDir, @"..\Transcriber"));
             }
             set => _transcriberPath = value;
         }

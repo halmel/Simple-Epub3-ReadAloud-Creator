@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using System.IO;
+using System.Text.Json.Serialization;
 
 namespace Readaloud_Epub3_Creator
 {
@@ -9,83 +10,201 @@ namespace Readaloud_Epub3_Creator
 
         public class Root
         {
-            public string file { get; set; }
-            public string language { get; set; }
-            public string text { get; set; }
+            [JsonPropertyName("file")]
+            public string File { get; set; } = string.Empty;
 
-            public double length { get; set; }
-            public List<Segment> segments { get; set; }
-        }
+            [JsonPropertyName("language")]
+            public string Language { get; set; } = string.Empty;
 
-        public class Segment
-        {
-            public int id { get; set; }
-            public double start { get; set; }
-            public double end { get; set; }
-            public string text { get; set; }
+            [JsonPropertyName("language_probability")]
+            public double LanguageProbability { get; set; }
 
-            public double fileLength { get; set; }
-            // New property to track the originating file
-            public string fileId { get; set; }
+            [JsonPropertyName("full_text")] // Matches the new Python key
+            public string FullText { get; set; } = string.Empty;
 
-            public int IndexInList { get; set; }
-            public static void AssignListIndices(List<Segment> words)
+            [JsonPropertyName("length")]
+            public double Length { get; set; }
+
+            [JsonPropertyName("fragments")] // Matches the new Python key
+            public List<Fragment> fragments { get; set; } = new();
+
+            /// <summary>
+            /// Helper to populate metadata across all fragments after deserialization
+            /// </summary>
+            public void LinkSegments()
             {
-                for (int i = 0; i < words.Count; i++)
+                for (int i = 0; i < fragments.Count; i++)
                 {
-                    words[i].IndexInList = i;
+                    fragments[i].FileId = this.File;
+                    fragments[i].FileLength = this.Length;
+                    fragments[i].IndexInList = i;
                 }
             }
-
         }
 
+        public class Fragment
+        {
+            [JsonPropertyName("start")]
+            public double Start { get; set; }
+
+            [JsonPropertyName("end")]
+            public double End { get; set; }
+
+            [JsonPropertyName("text")]
+            public string Text { get; set; } = string.Empty;
+
+            // --- Local helper properties (Not in JSON) ---
+
+            [JsonIgnore] // Prevents errors if you ever serialize this back to JSON
+            public double FileLength { get; set; }
+
+            [JsonIgnore]
+            public string FileId { get; set; } = string.Empty;
+
+            [JsonIgnore]
+            public int IndexInList { get; set; }
+            public static void AssignListIndices(List<Fragment> words)
+
+            {
+
+                for (int i = 0; i < words.Count; i++)
+
+                {
+
+                    words[i].IndexInList = i;
+
+                }
+
+            }
+        }
 
         // Function to extract all segments and add fileId to each
-        public static List<Segment> ExtractSegmentsWithFileId(List<Root> roots)
+        public static List<Fragment> ExtractSegmentsWithFileId(List<Root> roots)
         {
-            var result = new List<Segment>();
+            var result = new List<Fragment>();
             foreach (var root in roots)
             {
-                if (root.segments != null)
+                if (root.fragments != null)
                 {
-                    foreach (var segment in root.segments)
+                    foreach (var segment in root.fragments)
                     {
-                        segment.fileId = root.file;
-                        segment.fileLength = root.length;
+                        segment.FileId = root.File;
+                        segment.FileLength = root.Length;
                         result.Add(segment);
                     }
                 }
             }
             return result;
         }
+
+        public interface ITranscriptionScript
+        {
+            string ScriptName { get; }
+
+            public string[]? Mp3Files { get; set; }
+            public string? OutputPath { get; set; }
+
+            string GetArguments();
+
+            string TranscriptPath { get; set; }
+        }
+        
+        public enum FasterWhisperModel
+        {
+            Tiny,
+            Base,
+            Small,
+            Medium,
+            Large
+        }
+        public class CUDAFasterWhisperScript : ITranscriptionScript
+        {
+            public string ScriptName => @"faster_whisper_CUDA.py";
+            public string TranscriptPath { get; set; }
+            public string[]? Mp3Files { get; set; }
+            public string? OutputPath { get; set; }
+
+            public CUDAFasterWhisperScript(string transcriptPath, FasterWhisperModel model =FasterWhisperModel.Tiny)
+            {
+                TranscriptPath = transcriptPath;
+                Model = model;
+
+            }
+            // Customizable properties
+
+            public FasterWhisperModel Model { get; set; }
+
+            public string GetArguments()
+            {
+                if (Mp3Files == null)
+                {
+                    throw new Exception("Mp3Files cannot be null.");
+                }
+                if (OutputPath == null)
+                {
+                    throw new Exception("OutputPath cannot be null.");
+                }
+                string tempListPath = Path.Combine(Path.GetTempPath(), "mp3_list.txt");
+                File.WriteAllLines(tempListPath, Mp3Files);
+
+                return $"\"{Path.Combine(TranscriptPath, ScriptName)}\" --file-list \"{tempListPath}\" --output \"{OutputPath}\" --model \"{Model.ToString().ToLower()}\"";
+            }
+        }
+        public class CPUFasterWhisperScript : ITranscriptionScript
+        {
+            public string ScriptName => @"faster_whisper_CPU.py";
+            public string TranscriptPath { get; set; }
+
+            public string[]? Mp3Files { get; set; }
+            public string? OutputPath { get; set; }
+
+
+            // Customizable properties
+            public int Workers { get; set; } = 2;
+
+            public int BatchSize { get; set; }
+            public FasterWhisperModel Model { get; set; }
+
+
+            public CPUFasterWhisperScript(string transcriptPath, int Workers =2, FasterWhisperModel model = FasterWhisperModel.Tiny, int bachSize = 8)
+            {
+                TranscriptPath = transcriptPath;
+                this.Workers = Workers;
+                Model = model;
+                BatchSize = bachSize;
+
+            }
+            public string GetArguments()
+            {
+                if (Mp3Files == null)
+                {
+                    throw new Exception("Mp3Files cannot be null.");
+                }
+                if (OutputPath == null) { 
+                throw new Exception("OutputPath cannot be null.");
+                }
+                string tempListPath = Path.Combine(Path.GetTempPath(), "mp3_list.txt");
+                File.WriteAllLines(tempListPath, Mp3Files);
+
+                return $"\"{Path.Combine(TranscriptPath,ScriptName)}\" --file-list \"{tempListPath}\" --output \"{OutputPath}\" --workers {Workers} --model \"{Model.ToString().ToLower()}\" --bach-size \"{BatchSize}\"";
+            }
+        }
         public static string RunTranscription(
             string venvPath,
-            string scriptPath,
-            string[] mp3Files,
-            string device,
-            string outputPath,
-            int workers = 2,
-            Action<int>? onProgress = null
-        )
+            ITranscriptionScript script,
+            Action<string>? onLiveOutput = null)
         {
             string pythonExe = Path.Combine(venvPath, "Scripts", "python.exe");
 
             if (!File.Exists(pythonExe))
                 throw new FileNotFoundException("Python executable not found at: " + pythonExe);
 
-            // ✅ Write MP3 file list to temp file
-            string tempListPath = Path.Combine(Path.GetTempPath(), "mp3_list.txt");
-            File.WriteAllLines(tempListPath, mp3Files);
-
-            // Now your Python script should accept a list file input
-            string args = $"\"{scriptPath}\" --file-list \"{tempListPath}\" --device {device} --output \"{outputPath}\" --batch-size {workers}";
-
             var process = new Process
             {
                 StartInfo = new ProcessStartInfo
                 {
                     FileName = pythonExe,
-                    Arguments = args,
+                    Arguments = script.GetArguments(),
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
@@ -93,115 +212,29 @@ namespace Readaloud_Epub3_Creator
                 }
             };
 
-            var output = new List<string>();
+            var fullOutput = new List<string>();
 
-            process.OutputDataReceived += (sender, e) =>
+            // Shared handler for both StdOut and StdErr
+            DataReceivedEventHandler handler = (sender, e) =>
             {
-                if (e.Data != null)
-                {
-                    if (e.Data.StartsWith("PROGRESS:") && int.TryParse(e.Data.Replace("PROGRESS:", ""), out int percent))
-                    {
-                        onProgress?.Invoke(percent);
-                    }
-                    else
-                    {
-                        output.Add(e.Data);
-                    }
-                }
+                if (string.IsNullOrEmpty(e.Data)) return;
+
+                // 2. Pass back live console output
+                onLiveOutput?.Invoke(e.Data);
+
+                // 3. Keep track of full log for the return string
+                lock (fullOutput) { fullOutput.Add(e.Data); }
             };
 
-            process.ErrorDataReceived += (sender, e) =>
-            {
-                if (e.Data != null)
-                {
-                    output.Add("ERR: " + e.Data);
-                }
-            };
+            process.OutputDataReceived += handler;
+            process.ErrorDataReceived += handler;
 
             process.Start();
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
             process.WaitForExit();
 
-            return string.Join(Environment.NewLine, output);
+            return string.Join(Environment.NewLine, fullOutput);
         }
-// Experiment uneused
-        /// <summary>
-        /// Runs the Aeneas-based Python transcription alignment script on one audio/text pair using system Python.
-        /// </summary>
-        /// <param name="scriptPath">Path to the aeneas_transcribe.py script.</param>
-        /// <param name="audioFile">Path to the audiobook audio file (e.g., MP3 or WAV).</param>
-        /// <param name="textFile">Path to the text file containing the ebook content.</param>
-        /// <param name="outputPath">Path where the alignment JSON will be written.</param>
-        /// <param name="onProgress">Optional progress callback (0–100).</param>
-        /// <returns>Combined console output (stdout + stderr) as a single string.</returns>
-        public static string RunAeneasAlignment(
-            string scriptPath,
-            string audioFile,
-            string textFile,
-            string outputPath,
-            Action<int>? onProgress = null
-        )
-        {
-            // Use system Python
-            string pythonExe = "python"; // Assumes system Python is in PATH
-
-            if (!File.Exists(scriptPath))
-                throw new FileNotFoundException("Aeneas script not found: " + scriptPath);
-
-            if (!File.Exists(audioFile))
-                throw new FileNotFoundException("Audio file not found: " + audioFile);
-
-            if (!File.Exists(textFile))
-                throw new FileNotFoundException("Text file not found: " + textFile);
-
-            string args = $"\"{scriptPath}\" --audio \"{audioFile}\" --text \"{textFile}\" --output \"{outputPath}\"";
-
-            var outputLog = new List<string>();
-
-            var process = new Process
-            {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = pythonExe,
-                    Arguments = args,
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true
-                }
-            };
-
-            process.OutputDataReceived += (sender, e) =>
-            {
-                if (e.Data != null)
-                {
-                    // Capture Python progress updates
-                    if (e.Data.StartsWith("PROGRESS:") && int.TryParse(e.Data.Replace("PROGRESS:", ""), out int percent))
-                        onProgress?.Invoke(percent);
-                    else
-                        outputLog.Add(e.Data);
-                }
-            };
-
-            process.ErrorDataReceived += (sender, e) =>
-            {
-                if (e.Data != null)
-                    outputLog.Add("ERR: " + e.Data);
-            };
-
-            process.Start();
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
-            process.WaitForExit();
-
-            onProgress?.Invoke(100);
-            return string.Join(Environment.NewLine, outputLog);
-        }
-
-
-
-
-
     }
 }

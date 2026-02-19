@@ -430,7 +430,7 @@ namespace Readaloud_Epub3_Creator
 
             public int MaxSentanceIndex = -1;
 
-            public List<Segment> LinkedSegments { get; set; } = new();
+            public List<Fragment> LinkedSegments { get; set; } = new();
 
             public int IndexInList { get; set; }
             public static void AssignListIndices(List<WordSegment> words)
@@ -517,19 +517,19 @@ namespace Readaloud_Epub3_Creator
 
                 var groupedByFileId = fileGroup
                     .Where(w => w.LinkedSegments != null && w.LinkedSegments.Count > 0)
-                    .GroupBy(w => w.LinkedSegments[0].fileId);
+                    .GroupBy(w => w.LinkedSegments[0].FileId);
 
                 foreach (var group in groupedByFileId)
                 {
                     var allSegments = group
                         .SelectMany(w => w.LinkedSegments)
-                        .Where(s => s.fileId == group.Key)
+                        .Where(s => s.FileId == group.Key)
                         .ToList();
 
-                    var firstSegment = allSegments.OrderBy(s => s.start).First();
-                    var lastSegment = allSegments.OrderByDescending(s => s.end).First();
+                    var firstSegment = allSegments.OrderBy(s => s.Start).First();
+                    var lastSegment = allSegments.OrderByDescending(s => s.End).First();
 
-                    totalLengthSeconds += lastSegment.end - firstSegment.start;
+                    totalLengthSeconds += lastSegment.End - firstSegment.Start;
                 }
 
 
@@ -542,14 +542,14 @@ namespace Readaloud_Epub3_Creator
                 smilContent.AppendLine($"    <seq id=\"id_overlay_{Path.GetFileNameWithoutExtension(fileName)}\" epub:textref=\"{htmlRef}\" epub:type=\"chapter\">");
 
                 var bySegmentSet = fileGroup
-                    .GroupBy(w => string.Join(";", w.LinkedSegments.Select(s => $"{s.fileId}_{s.IndexInList}")))
+                    .GroupBy(w => string.Join(";", w.LinkedSegments.Select(s => $"{s.FileId}_{s.IndexInList}")))
                     .ToList();
 
 
 
 
 
-                double FileEnd = fileGroup.ToList().First(x => x.LinkedSegments.Count > 0).LinkedSegments[0].fileLength;
+                double FileEnd = fileGroup.ToList().First(x => x.LinkedSegments.Count > 0).LinkedSegments[0].FileLength;
 
 
 
@@ -562,7 +562,7 @@ namespace Readaloud_Epub3_Creator
                 {
 
                     string currentSegmentGroupKey = string.Join(";", segmentGroup.SelectMany(w => w.LinkedSegments)
-    .Select(s => $"{s.fileId}")
+    .Select(s => $"{s.FileId}")
     .Distinct());
 
                     bool isSameGroupAsBefore = currentSegmentGroupKey == previousSegmentGroupKey;
@@ -589,10 +589,10 @@ namespace Readaloud_Epub3_Creator
                     var firstSeg = allSegments.OrderBy(s => s.IndexInList).First();
                     var lastSeg = allSegments.OrderBy(s => s.IndexInList).Last();
 
-                    string audioSrc = $"{audioFolder}{firstSeg.fileId}";
+                    string audioSrc = $"{audioFolder}{firstSeg.FileId}";
                     if (PreviousEndTime == 0)
                     {
-                        PreviousEndTime = firstSeg.start;
+                        PreviousEndTime = firstSeg.Start;
                     }
                     double clipBegin = PreviousEndTime;
 
@@ -600,8 +600,8 @@ namespace Readaloud_Epub3_Creator
 
                     double totalChars = sentenceGroups.Sum(g => g.Sum(ws => (ws.Word ?? string.Empty).Length));
 
-                    double overallStart = sentenceGroups.First().First().LinkedSegments.First().start;
-                    double overallEnd = sentenceGroups.Last().Last().LinkedSegments.Last().end;
+                    double overallStart = sentenceGroups.First().First().LinkedSegments.First().Start;
+                    double overallEnd = sentenceGroups.Last().Last().LinkedSegments.Last().End;
                     double totalAvailableSpan = overallEnd - overallStart;
 
                     for (int i = 0; i < sentenceGroups.Count; i++)
@@ -616,7 +616,7 @@ namespace Readaloud_Epub3_Creator
                                 clipBegin = clipEnd;
 
                             }
-                            clipEnd = group.Last().LinkedSegments.Last().end;
+                            clipEnd = group.Last().LinkedSegments.Last().End;
 
                         }
                         else
@@ -669,11 +669,11 @@ namespace Readaloud_Epub3_Creator
         {
             // Find all unique fileIds across all linked segments
             var allSegments = words.SelectMany(w => w.LinkedSegments).ToList();
-            var fileGroups = allSegments.GroupBy(s => s.fileId);
+            var fileGroups = allSegments.GroupBy(s => s.FileId);
 
             foreach (var fileGroup in fileGroups)
             {
-                var segments = fileGroup.OrderBy(s => s.start).ToList();
+                var segments = fileGroup.OrderBy(s => s.Start).ToList();
                 if (segments.Count == 0)
                     continue;
 
@@ -681,9 +681,9 @@ namespace Readaloud_Epub3_Creator
                 var lastSeg = segments.Last();
 
                 // 🔹 Normalize first and last
-                double fileLength = lastSeg.fileLength;
-                firstSeg.start = 0;
-                lastSeg.end = fileLength;
+                double fileLength = lastSeg.FileLength;
+                firstSeg.Start = 0;
+                lastSeg.End = fileLength;
 
                 // 🔹 Update all references in WordSegments that point to these
                 foreach (var w in words)
@@ -691,14 +691,14 @@ namespace Readaloud_Epub3_Creator
                     for (int i = 0; i < w.LinkedSegments.Count; i++)
                     {
                         var seg = w.LinkedSegments[i];
-                        if (seg.fileId == fileGroup.Key)
+                        if (seg.FileId == fileGroup.Key)
                         {
                             // If matches first segment id → enforce new start
                             if (seg.IndexInList == firstSeg.IndexInList)
-                                seg.start = 0;
+                                seg.Start = 0;
                             // If matches last segment id → enforce new end
                             if (seg.IndexInList == lastSeg.IndexInList)
-                                seg.end = fileLength;
+                                seg.End = fileLength;
                         }
                     }
                 }

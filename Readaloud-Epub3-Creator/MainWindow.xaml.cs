@@ -13,6 +13,8 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using static Readaloud_Epub3_Creator.Book;
+using static Readaloud_Epub3_Creator.BookgroupList;
+using static Readaloud_Epub3_Creator.TranscriptClass;
 namespace Readaloud_Epub3_Creator
 {
     public partial class MainWindow : Window
@@ -47,7 +49,7 @@ namespace Readaloud_Epub3_Creator
 
 
         private string EbooksRoot => _settings.EbooksPath;
-        private BookgroupList groups = new();
+        private BookgroupList groups;
 
 
         private readonly Queue<Book> processingQueue = new();
@@ -101,12 +103,10 @@ namespace Readaloud_Epub3_Creator
 
         private void CreateBook_Click(object sender, RoutedEventArgs e)
         {
-            var window = new CreateBookWindow { Owner = this };
+            var window = new CreateBookWindow(ref groups);
 
             if (window.ShowDialog() == true)
             {
-                var book = window.CreatedBook;
-                groups.AddBook(book,_settings);
                 groups.LoadBooks(_settings);
             }
         }
@@ -115,7 +115,7 @@ namespace Readaloud_Epub3_Creator
         private void SelectAllUnprocessed_Click(object sender, RoutedEventArgs e)
         {
             var unprocessedIdleBooks = groups.CurrentGroup.Books
-                .Where(book => !book.IsProssed && book.Status == BookStatus.Idle);
+                .Where(book => !book.IsProcessed && book.Status == BookStatus.Idle);
 
             foreach (var book in unprocessedIdleBooks)
             {
@@ -156,7 +156,7 @@ namespace Readaloud_Epub3_Creator
 
             foreach (var book in selectedBooks)
             {
-                if (book.Status == BookStatus.Idle && !book.IsProssed)
+                if (book.Status == BookStatus.Idle && !book.IsProcessed)
                 {
                     book.Status = BookStatus.WaitingInQueue;
                     processingQueue.Enqueue(book);
@@ -199,7 +199,8 @@ namespace Readaloud_Epub3_Creator
                 {
                     try
                     {
-                        groups.MoveBookToGroup(book, targetGroup, _settings);
+                        Console.WriteLine("Not implemented yet");
+                        //groups.MoveBookToGroup(book, targetGroup, _settings);
                     }
                     catch (Exception ex)
                     {
@@ -273,19 +274,8 @@ namespace Readaloud_Epub3_Creator
 
                     if (bestMatch != null && bestMatch.Score > 60)
                     {
-                        var book = new Book
-                        {
-                            Title = title,  // Use the extracted title here
-                            EpubFile = epubFilePath,
-                            Mp3Files = bestMatch.Mp3s,
-                            FolderPath = Path.Combine(EbooksRoot, epubBaseName),
-                            IsProssed = false,
-                            Progress = 0,
-                            Status = BookStatus.Idle
-                        };
 
-                        groups.AddBook(book, _settings);
-                        groups.CurrentGroup.Books.Add(book);
+                        groups.AddBook(title, epubFilePath, bestMatch.Mp3s);
 
                         groups.LoadBooks(_settings);
                     }
@@ -384,7 +374,7 @@ namespace Readaloud_Epub3_Creator
                     try
                     {
                         // Use your existing remove function for books here
-                        groups.RemoveBook(book,_settings);
+                        groups.RemoveBook(book);
                     }
                     catch (Exception ex)
                     {
@@ -428,7 +418,7 @@ namespace Readaloud_Epub3_Creator
         {
             if (sender is Button button && button.DataContext is Book book)
             {
-                string logPath = Path.Combine(book.FolderPath, "OriginalEpub", "AlingmentLog.json");
+                string logPath = book.Data.AlignmentLogPath;
 
                 if (File.Exists(logPath))
                 {
@@ -450,9 +440,8 @@ namespace Readaloud_Epub3_Creator
             {
                 try
                 {
-                    string originalEpubPath = Path.Combine(book.FolderPath, "OriginalEpub");
-                    string alignmentLogPath = Path.Combine(originalEpubPath, "AlignmentLog.json");
-                    string wordsJsonPath = Path.Combine(originalEpubPath, "Words.json");
+                    string alignmentLogPath = book.Data.AlignmentLogPath;
+                    string wordsJsonPath = book.Data.WordsJsonPath;
 
                     if (File.Exists(alignmentLogPath))
                         File.Delete(alignmentLogPath);
@@ -498,6 +487,7 @@ namespace Readaloud_Epub3_Creator
 
         private async void ProcessNextInQueue()
         {
+            GenerateEpubUtil generator = new GenerateEpubUtil(new GenerateEpubUtilSettings() { TranscriptionScript= new CUDAFasterWhisperScript(_settings.TranscriberPath, FasterWhisperModel.Tiny) });
             if (isProcessing || processingQueue.Count == 0)
                 return;
 
@@ -512,14 +502,12 @@ namespace Readaloud_Epub3_Creator
 
             await Task.Run(() =>
             {
-                GenerateEpubUtil.GenerateEpub(_settings, book.FolderPath, progress);
+                generator.GenerateEpub(book.Data);
             });
 
             book.Status = BookStatus.Completed;
             book.Progress = 100;
 
-            // Update alignment log status
-            book.RefreshAlignmentLogStatus();
 
 
             isProcessing = false;

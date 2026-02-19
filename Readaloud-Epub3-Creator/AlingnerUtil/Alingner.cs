@@ -13,13 +13,13 @@ namespace Readaloud_Epub3_Creator
     {
         public static F23.StringSimilarity.NGram l = new NGram(2);
 
-        public static void AlignTranscriptToWords(ref List<WordSegment> words, List<Segment> segments, string wordPath, int anchorCount = 30)
+        public static void AlignTranscriptToWords(ref List<WordSegment> words, List<Fragment> Fragments, string wordPath, int anchorCount = 30)
         {
-            Dictionary<Segment, List<WordSegment>> alignment = AlignSegmentsToWords(segments, words, anchorCount, Path.GetFullPath(Path.Combine(wordPath, @"..\")));
+            Dictionary<Fragment, List<WordSegment>> alignment = AlignFragmentsToWords(Fragments, words, anchorCount, Path.GetFullPath(Path.Combine(wordPath, @"..\")));
 
             foreach (var kvp in alignment)
             {
-                var segment = kvp.Key;
+                var Fragment = kvp.Key;
                 var matchedWords = kvp.Value;
 
                 if (matchedWords.Count == 0)
@@ -30,7 +30,7 @@ namespace Readaloud_Epub3_Creator
                 {
                     foreach (var word in group)
                     {
-                        word.LinkedSegments.Add(segment);
+                        word.LinkedSegments.Add(Fragment);
                     }
                 }
             }
@@ -40,7 +40,7 @@ namespace Readaloud_Epub3_Creator
 
         public class LogEntry
         {
-            public int SegmentIndex { get; set; }
+            public int FragmentIndex { get; set; }
             public int StartPos { get; set; }
             public LogLevel Level { get; set; }
             public string Message { get; set; }
@@ -56,8 +56,8 @@ namespace Readaloud_Epub3_Creator
         private static List<LogEntry> _logs;
 
         // Main alignment function using anchors with logging
-        public static Dictionary<Segment, List<WordSegment>> AlignSegmentsToWords(
-            List<Segment> segments,
+        public static Dictionary<Fragment, List<WordSegment>> AlignFragmentsToWords(
+            List<Fragment> Fragments,
             List<WordSegment> words,
             int anchorCount,
             string LogPath = "",
@@ -66,14 +66,14 @@ namespace Readaloud_Epub3_Creator
             )
         {
             _logs = new List<LogEntry>();
-            var result = new Dictionary<Segment, List<WordSegment>>();
-            int n = segments.Count;
+            var result = new Dictionary<Fragment, List<WordSegment>>();
+            int n = Fragments.Count;
 
             // Choose anchors
             var anchors = new List<(int segIdx, int wordPos, List<WordSegment> match)>();
             int currentWordPos = 0;
 
-            int maxSegIdx = Math.Max(0, segments.Count - 6);
+            int maxSegIdx = Math.Max(0, Fragments.Count - 6);
 
             int failedAnchorsInARow = 0;
 
@@ -93,7 +93,7 @@ namespace Readaloud_Epub3_Creator
                 int searchWindow = (int)(baseWindow * 1.5) + extraWindow;
 
                 var match = TrySlowMatch(
-                    segments, ref segIdx, words, ref tempPos,
+                    Fragments, ref segIdx, words, ref tempPos,
                     hardDistanceLimit: searchWindow,
                     isAnchor: true,
                     scoreThreshold: 70
@@ -130,7 +130,7 @@ namespace Readaloud_Epub3_Creator
                     message,
                     tempPos,
                     words,
-                    segments[segIdx].text,
+                    Fragments[segIdx].Text,
                     match
                 );
 
@@ -156,7 +156,7 @@ namespace Readaloud_Epub3_Creator
             // Align between anchors
 
             // Align between anchors (multithreaded)
-            var parallelResult = new ConcurrentDictionary<Segment, List<WordSegment>>();
+            var parallelResult = new ConcurrentDictionary<Fragment, List<WordSegment>>();
 
             Parallel.ForEach(
                 Enumerable.Range(0, anchors.Count - 1),
@@ -170,23 +170,23 @@ namespace Readaloud_Epub3_Creator
             var (endSeg, endWords, _) = anchors[a + 1];
 
             if (startSeg >= 0)
-                parallelResult[segments[startSeg]] = anchors[a].match;
+                parallelResult[Fragments[startSeg]] = anchors[a].match;
 
             int segCount = endSeg - startSeg - 1;
             if (segCount <= 0)
                 return;
 
-            var subSegments = segments.GetRange(startSeg + 1, segCount);
+            var subFragments = Fragments.GetRange(startSeg + 1, segCount);
             var subWords = words.GetRange(startWords, endWords - startWords);
             int localPos = 0;
 
-            for (int j = 0; j < subSegments.Count; j++)
+            for (int j = 0; j < subFragments.Count; j++)
             {
-                var seg = subSegments[j];
+                var seg = subFragments[j];
                 int globalIdx = startSeg + 1 + j;
 
                 // --- FAST MATCH ---
-                var fast = TryFastMatch(subSegments, j, subWords, localPos, scoreThreshold, maxLookahead);
+                var fast = TryFastMatch(subFragments, j, subWords, localPos, scoreThreshold, maxLookahead);
                 if (fast != null && fast.TryGetValue(seg, out var fMatch))
                 {
                     parallelResult[seg] = fMatch;
@@ -197,7 +197,7 @@ namespace Readaloud_Epub3_Creator
                         "FastMatch success",
                         localPos,
                         subWords,
-                        seg.text,
+                        seg.Text,
                         fMatch
                     );
 
@@ -211,7 +211,7 @@ namespace Readaloud_Epub3_Creator
                 int tentativePos = backwardPos;
 
                 var slow = TrySlowMatch(
-                subSegments,
+                subFragments,
                 ref j,
                 subWords,
                 ref tentativePos,
@@ -235,7 +235,7 @@ namespace Readaloud_Epub3_Creator
                 msg,
                 tentativePos,
                 subWords,
-                seg.text,
+                seg.Text,
                 slow
             );
             }
@@ -257,7 +257,7 @@ namespace Readaloud_Epub3_Creator
         private static readonly object _logLock = new object();
 
         private static void LogOutcome(
-            int segmentIndex,
+            int FragmentIndex,
             LogLevel level,
             string message,
             int wordPos,
@@ -275,7 +275,7 @@ namespace Readaloud_Epub3_Creator
 
             var entry = new LogEntry
             {
-                SegmentIndex = segmentIndex,
+                FragmentIndex = FragmentIndex,
                 StartPos = wordPos,
                 Level = level,
                 Message = message,
@@ -283,6 +283,8 @@ namespace Readaloud_Epub3_Creator
                 MachedText = matchedText,
                 TargetText = targetText
             };
+            //Console.WriteLine(FragmentIndex);
+            //Console.WriteLine(level.ToString());
 
             // Thread-safe write
             lock (_logLock)
@@ -303,23 +305,23 @@ namespace Readaloud_Epub3_Creator
                 .ToList();
         }
 
-        private static Dictionary<Segment, List<WordSegment>> TryFastMatch(
-         List<Segment> segments,
+        private static Dictionary<Fragment, List<WordSegment>> TryFastMatch(
+         List<Fragment> Fragments,
          int currentIndex,
          List<WordSegment> words,
          int startPos,
          int scoreThreshold,
          int maxLookahead)
         {
-            var results = new Dictionary<Segment, List<WordSegment>>();
-            if (currentIndex == segments.Count)
+            var results = new Dictionary<Fragment, List<WordSegment>>();
+            if (currentIndex == Fragments.Count)
             {
                 currentIndex--;
             }
-            var current = segments[currentIndex];
+            var current = Fragments[currentIndex];
 
-            // 1. Find best single match for current segment
-            var (bestScore, bestLen) = FindBestMatchAt(words, startPos, current.text);
+            // 1. Find best single match for current Fragment
+            var (bestScore, bestLen) = FindBestMatchAt(words, startPos, current.Text);
             if (bestScore >= scoreThreshold && bestLen > 0)
             {
                 results[current] = words.Skip(startPos).Take(bestLen).ToList();
@@ -328,7 +330,7 @@ namespace Readaloud_Epub3_Creator
 
             // 2. Attempt lookahead justification
             if (TryLookahead(
-                segments, currentIndex, words, startPos,
+                Fragments, currentIndex, words, startPos,
                 scoreThreshold, maxLookahead, bestLen,
                 out var lookaheadLen))
             {
@@ -344,11 +346,14 @@ namespace Readaloud_Epub3_Creator
             List<WordSegment> words,
             int pos,
             string targetText,
-            int minCommonBigrams = 100)
+            int minCommonBigrams = 10)
         {
             var results = new List<(int score, int length, int diff)>();
             string normTarget = Normalize(targetText);
             var targetBigrams = GetCharacterBigrams(normTarget);
+            if (targetBigrams.Count() < minCommonBigrams) {
+                minCommonBigrams = targetBigrams.Count() / 2;
+            }
             StringBuilder sb = new StringBuilder();
 
             int consecutiveIncrease = 0;
@@ -419,7 +424,7 @@ namespace Readaloud_Epub3_Creator
 
 
         private static bool TryLookahead(
-            List<Segment> segments,
+            List<Fragment> Fragments,
             int currentIndex,
             List<WordSegment> words,
             int startPos,
@@ -431,23 +436,23 @@ namespace Readaloud_Epub3_Creator
             acceptedLength = currentBestLen;
 
             for (int offset = 1;
-                 offset <= maxLookahead && currentIndex + offset + 1 < segments.Count;
+                 offset <= maxLookahead && currentIndex + offset + 1 < Fragments.Count;
                  offset++)
             {
                 int pos1 = startPos + currentBestLen;
-                var seg1 = segments[currentIndex + offset];
-                var seg2 = segments[currentIndex + offset + 1];
+                var seg1 = Fragments[currentIndex + offset];
+                var seg2 = Fragments[currentIndex + offset + 1];
 
-                // 2a. Best match for next segment at pos1
-                var (score1, len1) = FindBestMatchAt(words, pos1, seg1.text);
+                // 2a. Best match for next Fragment at pos1
+                var (score1, len1) = FindBestMatchAt(words, pos1, seg1.Text);
 
                 // 2b. Conflict check: can seg1 match as well or better at startPos?
-                var (conflictScore, _) = FindBestMatchAt(words, startPos, seg1.text);
+                var (conflictScore, _) = FindBestMatchAt(words, startPos, seg1.Text);
                 if (conflictScore >= score1 && conflictScore >= scoreThreshold)
                     continue;
 
-                // 2c. Now match the following segment
-                var (score2, len2) = FindBestMatchAt(words, pos1 + len1, seg2.text);
+                // 2c. Now match the following Fragment
+                var (score2, len2) = FindBestMatchAt(words, pos1 + len1, seg2.Text);
 
                 // 2d. Apply your offset rules
                 bool ok = offset == 1
@@ -472,20 +477,20 @@ namespace Readaloud_Epub3_Creator
 
         // === MAIN ENTRY ===
         private static List<WordSegment> TrySlowMatch(
-            List<Segment> segments,
-            ref int segmentIndex,
+            List<Fragment> Fragments,
+            ref int FragmentIndex,
             List<WordSegment> wordStream,
             ref int wordStartPos,
             int hardDistanceLimit,
             int scoreThreshold,
             bool isAnchor = false)
         {
-            var segment = segments[segmentIndex];
+            var Fragment = Fragments[FragmentIndex];
             int originalStart = wordStartPos;
             int searchLimit = Math.Min(wordStream.Count, originalStart + hardDistanceLimit);
 
             // 🔍 Use a longer target text for initial approximate positioning
-            string targetText = BuildTargetText(segments, segmentIndex, minLength: 150);
+            string targetText = BuildTargetText(Fragments, FragmentIndex, minLength: 150);
             (int start, int end, int score)? region;
 
             if (hardDistanceLimit > 1000)
@@ -505,19 +510,19 @@ namespace Readaloud_Epub3_Creator
                 return null;
 
             // 🎯 Focus scanning within the promising region
-            var (bestPos, bestLen, bestScore) = FocusScanRegion(wordStream, regionStart, regionEnd, segment, scoreThreshold);
+            var (bestPos, bestLen, bestScore) = FocusScanRegion(wordStream, regionStart, regionEnd, Fragment, scoreThreshold);
 
-            // 🧠 Anchor refinement for the next segment
+            // 🧠 Anchor refinement for the next Fragment
             if (isAnchor)
             {
-                int nextSegmentIndex = segmentIndex + 1;
-                if (nextSegmentIndex < segments.Count)
+                int nextFragmentIndex = FragmentIndex + 1;
+                if (nextFragmentIndex < Fragments.Count)
                 {
-                    var (nextPos, nextLen, nextScore) = FocusScanRegion(wordStream, bestPos, regionEnd, segments[nextSegmentIndex], scoreThreshold);
+                    var (nextPos, nextLen, nextScore) = FocusScanRegion(wordStream, bestPos, regionEnd, Fragments[nextFragmentIndex], scoreThreshold);
                     if (nextScore > bestScore + 5)
                     {
                         bestPos = nextPos;
-                        segmentIndex = nextSegmentIndex;
+                        FragmentIndex = nextFragmentIndex;
                         bestScore = nextScore;
                         bestLen = nextLen;
                     }
@@ -525,10 +530,10 @@ namespace Readaloud_Epub3_Creator
             }
             else
             {
-                int nextSegmentIndex = segmentIndex + 1;
-                if (nextSegmentIndex < segments.Count)
+                int nextFragmentIndex = FragmentIndex + 1;
+                if (nextFragmentIndex < Fragments.Count)
                 {
-                    var (nextPos, nextLen, nextScore) = FocusScanRegion(wordStream, bestPos, regionEnd, segments[nextSegmentIndex], scoreThreshold);
+                    var (nextPos, nextLen, nextScore) = FocusScanRegion(wordStream, bestPos, regionEnd, Fragments[nextFragmentIndex], scoreThreshold);
                     if (nextScore > bestScore + 5)
                     {
                         bestScore = nextScore;
@@ -550,7 +555,7 @@ namespace Readaloud_Epub3_Creator
             List<WordSegment> wordStream,
             int regionStart,
             int regionEnd,
-            Segment segment,
+            Fragment Fragment,
             int scoreThreshold)
         {
             int bestScore = 0;
@@ -560,7 +565,7 @@ namespace Readaloud_Epub3_Creator
 
             for (int pos = regionStart; pos < regionEnd; pos++)
             {
-                var (score, len) = FindBestMatchAt(wordStream, pos, segment.text);
+                var (score, len) = FindBestMatchAt(wordStream, pos, Fragment.Text);
 
                 if (score > bestScore)
                 {
@@ -587,14 +592,14 @@ namespace Readaloud_Epub3_Creator
 
 
 
-        private static string BuildTargetText(List<Segment> segments, int startIndex, int minLength)
+        private static string BuildTargetText(List<Fragment> Fragments, int startIndex, int minLength)
         {
-            string text = segments[startIndex].text;
+            string text = Fragments[startIndex].Text;
             int next = startIndex + 1;
 
-            while (text.Length < minLength && next < segments.Count)
+            while (text.Length < minLength && next < Fragments.Count)
             {
-                text += segments[next].text;
+                text += Fragments[next].Text;
                 next++;
             }
 

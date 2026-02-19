@@ -42,18 +42,13 @@ namespace Readaloud_Epub3_Creator
 
         private void BrowseTranscriber_Click(object sender, RoutedEventArgs e)
         {
-            var dialog = new OpenFileDialog
-            {
-                Title = "Select Python Executable",
-                Filter = "Python Executable|python.exe",
-                CheckFileExists = true
-            };
-
+            var dialog = new OpenFolderDialog { };
             if (dialog.ShowDialog() == true)
             {
-                TranscriberPathTextBox.Text = dialog.FileName;
+                TranscriberPathTextBox.Text = dialog.FolderName;
             }
         }
+        
         private void DeleteSettings_Click(object sender, RoutedEventArgs e)
         {
             var result = MessageBox.Show(

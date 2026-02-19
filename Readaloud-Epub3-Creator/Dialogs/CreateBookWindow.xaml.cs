@@ -14,7 +14,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using EpubSharp;
 using System.IO;
-
+using Readaloud_Epub3_Creator;
 namespace Readaloud_Epub3_Creator
 {
     /// <summary>
@@ -22,11 +22,12 @@ namespace Readaloud_Epub3_Creator
     /// </summary>
     public partial class CreateBookWindow : Window
     {
-        public Book CreatedBook { get; private set; }
+        public BookgroupList bookgrouplist;
         private List<string> selectedMp3s = new List<string>();
 
-        public CreateBookWindow()
+        public CreateBookWindow(ref BookgroupList bookgroup)
         {
+            bookgrouplist = bookgroup;
             InitializeComponent();
         }
 
@@ -80,13 +81,7 @@ namespace Readaloud_Epub3_Creator
                 MessageBox.Show("Please select an EPUB file and ensure the title is set.", "Incomplete", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
-
-            CreatedBook = new Book
-            {
-                Title = TitleTextBox.Text.Trim(),
-                EpubFile = EpubTextBox.Text,
-                Mp3Files = selectedMp3s
-            };
+            bookgrouplist.AddBook(TitleTextBox.Text.Trim(), EpubTextBox.Text, selectedMp3s);
 
             DialogResult = true;
             Close();

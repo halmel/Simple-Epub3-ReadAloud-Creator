@@ -1,108 +1,120 @@
-﻿using FuzzySharp;
-using HtmlAgilityPack;
+﻿using HtmlAgilityPack;
 using Newtonsoft.Json;
-using System.Text;
-using System.Xml;
+using System.IO;
+using static Readaloud_Epub3_Creator.Alingner;
 using static Readaloud_Epub3_Creator.EpubUtility;
 using static Readaloud_Epub3_Creator.TranscriptClass;
-using static Readaloud_Epub3_Creator.Alingner;
-using System.IO;
 namespace Readaloud_Epub3_Creator
 {
+    public class GenerateEpubUtilSettings
+    {
+        public ITranscriptionScript TranscriptionScript { get; set; }
+    }
     public class GenerateEpubUtil
     {
-        public static void GenerateEpub(Readaloud_Epub3_Creator.AppSettings settings, string folderPath, IProgress<int>? progress = null)
+        public GenerateEpubUtilSettings Settings { get; set; }
+        public GenerateEpubUtil(GenerateEpubUtilSettings settings)
         {
+            this.Settings = settings;
+        }
+        public void GenerateEpub(BookData data)
+        {
+            // 1. Validation & Setup
+            if (string.IsNullOrEmpty(data.EpubPath) || !File.Exists(data.EpubPath))
+            {
+                Console.WriteLine("Error: Source EPUB not found.");
+                return;
+            }
 
-            string device = settings.Device;
-            string transcriberPath = settings.TranscriberPath;
-            int workers = settings.MaxConcurrentTranscriptions;
+            Settings.TranscriptionScript.Mp3Files = data.Mp3Paths.ToArray();
+            Settings.TranscriptionScript.OutputPath = data.TranscriptionJsonPath;
 
 
 
 
-
-
-            Console.WriteLine("Starting Alingment");
-            string epubPath = Path.Combine(folderPath, "OriginalEpub");
-            string epubFilePath = GetAllFilesOfType(epubPath, ".epub")[0];
-            string epubFolderPathNew = Path.Combine(folderPath, "ProcessedEpub");
-            string epubPathNew = Path.GetFullPath(Path.Combine(folderPath, @"..\", "ProcessedBooks", Path.GetFileName(epubFilePath)));
-            string audioPath = Path.Combine(folderPath, "Audio");
-
-            // Load and extract
-            Dictionary<string, HtmlDocument> htmlDocs = LoadEpubAndExtractHtml(epubFilePath);
+            // 2. Load and extract EPUB content
+            Dictionary<string, HtmlDocument> htmlDocs = LoadEpubAndExtractHtml(data.EpubPath);
             var segments = ExtractAllTextSegments(htmlDocs);
             List<WordSegment> wordSegments = SplitTextSegmentsIntoWords(segments);
 
-            List<string> mp = GetAllFilesOfType(audioPath, ".mp3");
-            string jsonFilePath = Path.Combine(audioPath, "transcriptions.json");
-            string y = "";
-
-            if (File.Exists(jsonFilePath))
+            // 3. Handle Transcription (Local Cache or Python Script)
+            string transcriptionRaw = "";
+            if (File.Exists(data.TranscriptionJsonPath))
             {
-                y = File.ReadAllText(jsonFilePath);
+                transcriptionRaw = File.ReadAllText(data.TranscriptionJsonPath);
             }
             else
             {
-                Console.WriteLine("Running transcriptor on device: " + device);
 
-                string transcriptionOutput = RunTranscription(
-                    venvPath: Path.GetFullPath(Path.Combine(transcriberPath, @"..\venv")),
-                    scriptPath: transcriberPath,
-                    mp3Files: mp.ToArray(),
-                    device: device,
-                    outputPath: jsonFilePath,
-                    workers: workers,
-                    onProgress: progress.Report // Link progress to UI
+                // Ensure the directory for the output exists
+                Directory.CreateDirectory(data.AudioPathDir);
+
+                RunTranscription(
+                    Path.GetFullPath(Path.Combine(Settings.TranscriptionScript.TranscriptPath, @"venv")),
+                    Settings.TranscriptionScript,
+                    line => Console.WriteLine("[Transcription] " + line)
                 );
 
-                Console.WriteLine(transcriptionOutput);
-                if (File.Exists(jsonFilePath))
-                {
-
-                y = File.ReadAllText(jsonFilePath);
-                }
-                else
-                {
-                    return;
-                }
+                if (!File.Exists(data.TranscriptionJsonPath)) return;
+                transcriptionRaw = File.ReadAllText(data.TranscriptionJsonPath);
             }
 
-            List<Root> transcript = JsonConvert.DeserializeObject<List<Root>>(y);
-            List<Segment> segments1 = ExtractSegmentsWithFileId(transcript);
-            Segment.AssignListIndices(segments1);
-
-            string wordPath = Path.Combine(epubPath, "Words.json");
-            List<WordSegment> words = File.Exists(wordPath) ? LoadWordSegments(wordPath) : new List<WordSegment>();
-            if (!File.Exists(wordPath))
+            // 4. Process Transcript
+            List<Root> transcript = JsonConvert.DeserializeObject<List<Root>>(transcriptionRaw);
+            foreach (var item in transcript)
             {
-                Console.WriteLine("running Alingment");
-                AlignTranscriptToWords(ref wordSegments, segments1, wordPath);
-                words = LoadWordSegments(wordPath);
+                item.LinkSegments();
+            }
+            List<Fragment> audioSegments = ExtractSegmentsWithFileId(transcript);
+            Fragment.AssignListIndices(audioSegments);
+
+            // 5. Alignment (Local Cache or Logic)
+            List<WordSegment> words;
+            if (File.Exists(data.WordsJsonPath))
+            {
+                words = LoadWordSegments(data.WordsJsonPath);
+            }
+            else
+            {
+                Console.WriteLine("Running Alignment...");
+                AlignTranscriptToWords(ref wordSegments, audioSegments, data.WordsJsonPath);
+                words = LoadWordSegments(data.WordsJsonPath);
             }
 
             WordSegment.AssignListIndices(words);
 
+            // 6. Refine Segments & SMIL Generation
             var audioGaps = CollectAudioLinkGaps(words);
-            FillSegmentGaps(ref words, segments1, audioGaps);
-
+            FillSegmentGaps(ref words, audioSegments, audioGaps);
 
             AssignSentenceIndices(words, htmlDocs);
             TagWordsWithSmilSpans(words);
 
-            Console.WriteLine("generating smil files");
-            string smilPath = Path.Combine(epubFolderPathNew, "MediaOverlays");
+            // Create SMIL files in the temporary processing directory
+            string smilPath = Path.Combine(data.TempProcessingFolder, "MediaOverlays");
+            Directory.CreateDirectory(smilPath);
+
             NormalizeSegmentsToFullMp3Length(words);
             GenerateSmilFiles(words, smilPath);
 
-
+            // 7. Final Rebuild
             List<HtmlTextSegment> recombinedSegments = RecombineWordsIntoTextSegments(words);
-
             ApplyTextSegmentsToHtmlDocuments(htmlDocs, recombinedSegments);
 
             var smilFiles = GetAllFilesOfType(smilPath, ".smil");
-            RebuildEpubWithMedia(epubFilePath, htmlDocs, smilFiles, mp, epubPathNew);
+
+            // Ensure the global ProcessedBooks folder exists before saving
+            Directory.CreateDirectory(data.GlobalProcessedFolder);
+
+            RebuildEpubWithMedia(
+                data.EpubPath,
+                htmlDocs,
+                smilFiles,
+                data.Mp3Paths,
+                data.FinalEpubOutputPath
+            );
+
+            Console.WriteLine("EPUB Generation Complete: " + data.FinalEpubOutputPath);
         }
 
 
@@ -184,7 +196,7 @@ namespace Readaloud_Epub3_Creator
 
                 // Group by segment group (based on linked segments)
                 var bySegmentGroup = fileGroup
-                    .GroupBy(w => string.Join(",", w.LinkedSegments.Select(s => $"{s.fileId}_seg-{s.IndexInList}")))
+                    .GroupBy(w => string.Join(",", w.LinkedSegments.Select(s => $"{s.FileId}_seg-{s.IndexInList}")))
                     .ToList();
 
                 foreach (var segmentGroup in bySegmentGroup)
@@ -257,7 +269,7 @@ namespace Readaloud_Epub3_Creator
 
                 // Group by unique segment ID key
                 var bySegmentGroup = fileGroup
-                    .GroupBy(w => string.Join(",", w.LinkedSegments.Select(s => $"{s.fileId}_seg-{s.IndexInList}")))
+                    .GroupBy(w => string.Join(",", w.LinkedSegments.Select(s => $"{s.FileId}_seg-{s.IndexInList}")))
                     .ToList();
 
                 foreach (var segmentGroup in bySegmentGroup)
@@ -324,7 +336,7 @@ namespace Readaloud_Epub3_Creator
             public bool IsGap { get; set; }
 
         }
-        public static void FillSegmentGaps(ref List<WordSegment> words, List<Segment> segments, List<AudioLinkGap> gaps)
+        public static void FillSegmentGaps(ref List<WordSegment> words, List<Fragment> segments, List<AudioLinkGap> gaps)
         {
             foreach (var gap in gaps)
             {
@@ -353,7 +365,7 @@ namespace Readaloud_Epub3_Creator
 
                 foreach (var word in gap.AffectedWords)
                 {
-                    word.LinkedSegments = new List<Segment>(inBetweenSegments);
+                    word.LinkedSegments = new List<Fragment>(inBetweenSegments);
                     words[word.IndexInList].LinkedSegments = word.LinkedSegments;
                 }
             }
@@ -367,7 +379,7 @@ namespace Readaloud_Epub3_Creator
             var gaps = new List<AudioLinkGap>();
             AudioLinkGap currentGap = null;
 
-            Segment previousSegment = null;
+            Fragment previousSegment = null;
 
             for (int i = 0; i < words.Count; i++)
             {
@@ -419,46 +431,6 @@ namespace Readaloud_Epub3_Creator
 
             return gaps;
         }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
