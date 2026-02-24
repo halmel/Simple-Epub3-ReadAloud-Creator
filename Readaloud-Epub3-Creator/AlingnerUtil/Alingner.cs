@@ -9,7 +9,7 @@ using static Readaloud_Epub3_Creator.TranscriptClass;
 
 namespace Readaloud_Epub3_Creator
 {
-    internal class Alingner
+    public class Alingner
     {
         public static F23.StringSimilarity.NGram l = new NGram(2);
 
@@ -49,7 +49,7 @@ namespace Readaloud_Epub3_Creator
             public string MachedText { get; set; }
             public string TargetText { get; set; }
 
-            public bool IsSystemMessage { get; set; } = false; // <- NEW
+            public bool IsSystemMessage { get; set; } = false;
         }
 
 

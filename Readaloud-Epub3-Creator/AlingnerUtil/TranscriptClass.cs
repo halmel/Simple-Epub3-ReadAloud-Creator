@@ -1,6 +1,8 @@
 ﻿using System.Diagnostics;
 using System.IO;
 using System.Text.Json.Serialization;
+using static Readaloud_Epub3_Creator.AlingnerUtil.AlingnerNew;
+using static Readaloud_Epub3_Creator.EpubUtility;
 
 namespace Readaloud_Epub3_Creator
 {
@@ -63,18 +65,29 @@ namespace Readaloud_Epub3_Creator
 
             [JsonIgnore]
             public int IndexInList { get; set; }
+
+            [JsonIgnore]
+            public string NormalizedText => NormalizeText(Text);
+
+            [JsonIgnore]
+
+            public int NormalizedLength => NormalizedText.Length;
+
+            [JsonIgnore]
+            public int NormArrayIndex { get; set; }
+            [JsonIgnore]
+            public int NormIndexIndexEnd { get { return NormArrayIndex + NormalizedLength; } }
+
+
             public static void AssignListIndices(List<Fragment> words)
-
             {
-
+                int normIndex = 0;
                 for (int i = 0; i < words.Count; i++)
-
                 {
-
                     words[i].IndexInList = i;
-
+                    words[i].NormArrayIndex = normIndex;
+                    normIndex += words[i].NormalizedLength;
                 }
-
             }
         }
 

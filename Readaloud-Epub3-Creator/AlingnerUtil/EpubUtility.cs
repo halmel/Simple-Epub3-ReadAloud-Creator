@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml;
 using static Readaloud_Epub3_Creator.TranscriptClass;
+using static Readaloud_Epub3_Creator.AlingnerUtil.AlingnerNew;
 
 
 // Rebuild the EPUB by replacing HTML content with edited HtmlDocuments
@@ -435,11 +436,22 @@ namespace Readaloud_Epub3_Creator
             public int IndexInList { get; set; }
             public static void AssignListIndices(List<WordSegment> words)
             {
+                int normIndex = 0;
                 for (int i = 0; i < words.Count; i++)
                 {
                     words[i].IndexInList = i;
+                    words[i].NormArrayIndex = normIndex;
+                    normIndex += words[i].NormalizedLength;
                 }
             }
+            public string NormalizedWord => NormalizeText(Word);
+
+            public int NormalizedLength => NormalizedWord.Length;
+
+            public int NormArrayIndex { get; set; }
+            public int NormIndexIndexEnd { get { return NormArrayIndex + NormalizedLength; } }
+
+
         }
 
 
