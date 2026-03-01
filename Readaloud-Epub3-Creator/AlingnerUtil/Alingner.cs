@@ -9,7 +9,7 @@ using static Readaloud_Epub3_Creator.TranscriptClass;
 
 namespace Readaloud_Epub3_Creator
 {
-    public class Alingner
+    public class AlingnerOld
     {
         public static F23.StringSimilarity.NGram l = new NGram(2);
 

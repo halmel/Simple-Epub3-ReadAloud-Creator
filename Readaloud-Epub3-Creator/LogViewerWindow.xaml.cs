@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Windows;
-using static Readaloud_Epub3_Creator.Alingner;
+using static Readaloud_Epub3_Creator.AlingnerOld;
 
 namespace Readaloud_Epub3_Creator
 {

@@ -123,7 +123,7 @@ namespace Readaloud_Epub3_Creator
             }
         }
 
-        public string? AlignmentLogPath
+        public string? AlignmentLog
         {
             get
             {
@@ -131,6 +131,15 @@ namespace Readaloud_Epub3_Creator
                 return File.Exists(path) ? path : null;
             }
         }
+        public string AlignmentLogPath
+        {
+            get
+            {
+                string path = Path.Combine(EpubPathDir, LogName);
+                return path;
+            }
+        }
+
 
         // Helper paths for internal use
         public string EpubPathDir => Path.Combine(RootFolder, EpubDir);

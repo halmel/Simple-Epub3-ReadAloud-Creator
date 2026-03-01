@@ -6,7 +6,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Media;
 using Readaloud_Epub3_Creator;
 using static Readaloud_Epub3_Creator.Book;
-using static Readaloud_Epub3_Creator.Alingner;
+using static Readaloud_Epub3_Creator.AlingnerOld;
 using System.Windows;
 
 namespace Readaloud_Epub3_Creator

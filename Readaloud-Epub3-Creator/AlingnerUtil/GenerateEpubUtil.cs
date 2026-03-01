@@ -1,7 +1,8 @@
 ﻿using HtmlAgilityPack;
 using Newtonsoft.Json;
+using Readaloud_Epub3_Creator.AlingnerUtil;
 using System.IO;
-using static Readaloud_Epub3_Creator.Alingner;
+using static Readaloud_Epub3_Creator.AlingnerUtil.AlingnerNew;
 using static Readaloud_Epub3_Creator.EpubUtility;
 using static Readaloud_Epub3_Creator.TranscriptClass;
 namespace Readaloud_Epub3_Creator
@@ -36,7 +37,7 @@ namespace Readaloud_Epub3_Creator
             Dictionary<string, HtmlDocument> htmlDocs = LoadEpubAndExtractHtml(data.EpubPath);
             var segments = ExtractAllTextSegments(htmlDocs);
             List<WordSegment> wordSegments = SplitTextSegmentsIntoWords(segments);
-
+            WordSegment.AssignListIndices(wordSegments);
             // 3. Handle Transcription (Local Cache or Python Script)
             string transcriptionRaw = "";
             if (File.Exists(data.TranscriptionJsonPath))
@@ -77,7 +78,8 @@ namespace Readaloud_Epub3_Creator
             else
             {
                 Console.WriteLine("Running Alignment...");
-                AlignTranscriptToWords(ref wordSegments, audioSegments, data.WordsJsonPath);
+                var aling = new AlingnerNew(ref wordSegments,ref audioSegments, data.WordsJsonPath,data.AlignmentLogPath);
+                aling.RunAlingment();
                 words = LoadWordSegments(data.WordsJsonPath);
             }
 

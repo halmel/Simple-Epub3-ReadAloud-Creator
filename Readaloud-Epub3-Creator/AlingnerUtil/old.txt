@@ -1,4 +1,4 @@
-﻿using F23.StringSimilarity;
+using F23.StringSimilarity;
 using FuzzySharp;
 using FuzzySharp.SimilarityRatio.Scorer;
 using ModernWpf.Controls.Primitives;
@@ -27,11 +27,13 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
         public List<Fragment> TranscriptSegments { get; set; }
 
         public byte[] words { get; set; }
+        public ushort[] wordsTrigrams { get; set; }
         public AlingmentMapper[] WordsMap { get; set; }
 
         public AlingmentMapper[] WordsSentances { get; set; }
 
         public byte[] fragments { get; set; }
+        public ushort[] fragmentsTrigrams { get; set; }
         public AlingmentMapper[] FragmentsMap { get; set; }
 
         private const byte SpaceCode = 26;
@@ -49,8 +51,7 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
             TranscriptSegments = transcriptSegments;
 
             WordsMap = new AlingmentMapper[BookSegments.Count];
-            for (int i = 0; i < BookSegments.Count; i++)
-            {
+            for (int i = 0; i < BookSegments.Count; i++) {
                 WordsMap[i] = new AlingmentMapper();
             }
             words = BuildByteArray(BookSegments, WordsMap, s => s.NormalizedWord);
@@ -62,9 +63,13 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
             }
             fragments = BuildByteArray(TranscriptSegments, FragmentsMap, s => s.NormalizedText);
 
+            wordsTrigrams = PrecalculateTrigrams(words);
+            fragmentsTrigrams = PrecalculateTrigrams(fragments);
+            UpdateMapperTrigramIndices(WordsMap);
+            UpdateMapperTrigramIndices(FragmentsMap);
             WordsSentances = BuildSentenceMapFromWords();
+            UpdateMapperTrigramIndices(WordsSentances);
         }
-
         private AlingmentMapper[] BuildSentenceMapFromWords()
         {
             List<AlingmentMapper> sentences = new();
@@ -103,7 +108,6 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
 
             return sentences.ToArray();
         }
-
         private static byte[] BuildByteArray<T>(
             List<T> segments,
             AlingmentMapper[] map,
@@ -122,9 +126,8 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
             foreach (dynamic segment in segments)
             {
                 string text = selector(segment);
-                if (text.Length != 0 && lastWasSpace == false && char.IsWhiteSpace(text.First()) == false && text.First() != '.') { text = " " + text; }
-                if (text.Length != 0 && char.IsWhiteSpace(text.Last()))
-                {
+                if (text.Length != 0 && lastWasSpace == false &&char.IsWhiteSpace( text.First())==false&& text.First() != '.') { text = " " + text; }
+                if (text.Length != 0 &&char.IsWhiteSpace( text.Last())) {
                     lastWasSpace = true;
                 }
                 else
@@ -141,11 +144,39 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
                 pos = pos + text.Length;
 
                 for (int i = 0; i < text.Length; i++)
-                    result.Add(MapChar(text[i]));
+                    result.Add( MapChar(text[i]));
             }
             //var x = sb.ToString();
             //Console.WriteLine(x);
             return result.ToArray();
+        }
+
+        private static ushort[] PrecalculateTrigrams(ReadOnlySpan<byte> text)
+        {
+            if (text.Length < 3)
+                return Array.Empty<ushort>();
+
+            ushort[] hashes = new ushort[text.Length - 2];
+            Span<ushort> hashSpan = hashes;
+
+            for (int i = 0; i < text.Length - 2; i++)
+            {
+                hashSpan[i] = (ushort)(
+                    text[i] * Base2 +
+                    text[i + 1] * AlphabetSize +
+                    text[i + 2]);
+            }
+
+            return hashes;
+        }
+
+        private static void UpdateMapperTrigramIndices(AlingmentMapper[] maps)
+        {
+            foreach (var m in maps)
+            {
+                m.TrigramStart = m.StartId;
+                m.TrigramEnd = Math.Max(m.TrigramStart, m.EndId - 2);
+            }
         }
 
         // Optional: Fast normalization without Regex
@@ -185,7 +216,6 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
 
             return new string(buffer[..(lastWasSpace && pos > 0 ? pos - 1 : pos)]);
         }
-
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static byte MapChar(char c)
         {
@@ -210,6 +240,10 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
             public int EndId;
             public int ListIndex;
 
+            public int TrigramStart;
+            public int TrigramEnd;
+
+
             public int Length
             {
                 get
@@ -218,6 +252,13 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
                 }
             }
 
+            public int TrigramLength
+            {
+                get
+                {
+                    return TrigramEnd - TrigramStart;
+                }
+            }
             public int FirstWordIndex;//sentance only
             public int LastWordIndex;//sentance only
         }
@@ -246,9 +287,9 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
             var rootJob = new AlignmentJob
             {
                 WordStartIndex = 0,
-                WordEndIndex = BookSegments.Count - 1,
+                WordEndIndex = BookSegments.Count-1,
                 FragmentStartIndex = 0,
-                FragmentEndIndex = TranscriptSegments.Count - 1
+                FragmentEndIndex = TranscriptSegments.Count-1
             };
 
             Stack<AlignmentJob> jobQueue = new Stack<AlignmentJob>();
@@ -297,9 +338,9 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
             {
                 int startFragIdx = job.FragmentStartIndex + (i * step);
 
-
+                 
                 // Search for this sequence of fragments in the word range
-                var result = FindFragmentSequenceMatchInWordRange(startFragIdx, Math.Max(anchors.Last().WordIdx - (int)(step * 0.5), job.WordStartIndex), job.WordEndIndex, 70);
+                var result = FindFragmentSequenceMatchInWordRange(startFragIdx, Math.Max(anchors.Last().WordIdx-(int)(step*0.5),job.WordStartIndex), job.WordEndIndex, 70);
 
                 if (result.score > 50)
                 {
@@ -336,10 +377,10 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
             int startFragIdx,
             int wordSearchStart,
             int wordSearchEnd,
-            int requiredQuickExitScore)
+            int requiedQuickExitScore)
         {
-            var anchorBytes = GetFragmentBytes(startFragIdx, startFragIdx + 1);
-            int anchorLen = anchorBytes.Length;
+            var anchorTrigrams = GetFragmentTrigrams(startFragIdx, startFragIdx + 1);
+            int anchorLen = anchorTrigrams.Length;
 
             int bestSentenceIdx = -1;
             int bestSentenceScore = 0;
@@ -357,10 +398,10 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
                 if (sentence.FirstWordIndex >= wordSearchEnd)
                     break;
 
-                int byteStart = sentence.StartId;
+                int triStart = sentence.TrigramStart;
 
                 int desiredLength = (int)(anchorLen * 1.2);
-                int maxAvailable = words.Length - byteStart;
+                int maxAvailable = wordsTrigrams.Length - triStart;
                 int safeLength = desiredLength > maxAvailable
                     ? maxAvailable
                     : desiredLength;
@@ -368,8 +409,8 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
                 if (safeLength <= 0)
                     continue;
 
-                var span = words.AsSpan(byteStart, safeLength);
-                int score = FuzzyScoringAlgorithms.ScoreJaccard(anchorBytes, span);
+                var span = wordsTrigrams.AsSpan(triStart, safeLength);
+                int score = FuzzyScoringAlgorithms.ScoreJaccard(anchorTrigrams, span);
 
                 // 🔥 Apply ValidateExpansion on sentence level
                 if (score >= EXPANSION_PASS_SCORE &&
@@ -393,29 +434,29 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
             // ----------------------------
             var bestSentence = WordsSentances[bestSentenceIdx];
 
-            int paddingBytes = anchorLen; // bytes padding
+            int paddingWords = anchorLen; // customizable ratio 1 trigram ≈ 1 word
 
             int searchWordStart = Math.Max(wordSearchStart,
-                bestSentence.FirstWordIndex - (paddingBytes / 5)); // Rough estimate: 5 bytes per word average
+                bestSentence.FirstWordIndex - paddingWords);
 
             int searchWordEnd = Math.Min(wordSearchEnd,
-                bestSentence.LastWordIndex + (paddingBytes / 5));
+                bestSentence.LastWordIndex + paddingWords);
 
             int bestScore = 0;
             int bestWord = -1;
             int noImprovementCounter = 0;
 
-            int windowByteLength = (int)(anchorLen * 1.2);
+            int windowTrigramLength = (int)(anchorLen * 1.2);
 
             for (int w = searchWordStart; w <= searchWordEnd; w++)
             {
-                int byteStart = WordsMap[w].StartId;
+                int triStart = WordsMap[w].TrigramStart;
 
-                if (byteStart + windowByteLength > words.Length)
+                if (triStart + windowTrigramLength > wordsTrigrams.Length)
                     break;
 
-                var span = words.AsSpan(byteStart, windowByteLength);
-                int score = FuzzyScoringAlgorithms.ScoreJaccard(anchorBytes, span);
+                var span = wordsTrigrams.AsSpan(triStart, windowTrigramLength);
+                int score = FuzzyScoringAlgorithms.ScoreJaccard(anchorTrigrams, span);
 
                 if (score >= EXPANSION_PASS_SCORE &&
                     ValidateExpansion(score, startFragIdx, w,
@@ -433,38 +474,33 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
                     noImprovementCounter++;
                 }
 
-                if (noImprovementCounter > 45 && bestScore > requiredQuickExitScore)
+                if (noImprovementCounter > 45 && bestScore > requiedQuickExitScore)
                     break;
             }
 
             return (bestWord, bestScore);
         }
-
         private bool ValidateExpansion(
             int baseScore,
-            int anchorFragIdx,
-            int anchorWordIdx,
-            int wordSearchStart,
-            int wordSearchEnd)
+    int anchorFragIdx,
+    int anchorWordIdx,
+    int wordSearchStart,
+    int wordSearchEnd)
         {
-            int wordStartByte = WordsMap[anchorWordIdx].StartId;
-
+            int wordstartIndex = WordsMap[anchorWordIdx].TrigramStart;
             // Forward validation
             for (int i = 1; i <= EXPANSION_DEPTH; i++)
             {
+
                 if (anchorFragIdx + i >= FragmentsMap.Length ||
-                    anchorWordIdx + i >= WordsMap.Length ||
-                    wordStartByte >= wordSearchEnd)
+                    wordstartIndex >= wordSearchEnd)
                     break; // safe bounds exit
 
-                var fragBytesNext = GetFragmentBytes(anchorFragIdx, anchorFragIdx + i + 1);
-                int desiredLengthNext = (int)(fragBytesNext.Length * 1.2);
-
-                // Get byte range for the next words
-                int nextWordStartByte = WordsMap[anchorWordIdx + i].StartId;
+                var fragTrigramsNext = GetFragmentTrigrams(anchorFragIdx, anchorFragIdx + i+1);
+                int desiredLengthNext = (int)(fragTrigramsNext.Length * 1.2);
 
                 // Clamp length so we never go out of bounds
-                int maxAvailableNext = wordSearchEnd - nextWordStartByte;
+                int maxAvailableNext = wordSearchEnd - wordstartIndex;
                 int safeLengthNext = desiredLengthNext > maxAvailableNext
                     ? maxAvailableNext
                     : desiredLengthNext;
@@ -472,11 +508,29 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
                 if (safeLengthNext <= 0)
                     continue;
 
-                var wordBytes = words.AsSpan(nextWordStartByte, safeLengthNext);
 
-                int score = FuzzyScoringAlgorithms.ScoreJaccard(fragBytesNext, wordBytes);
+    //            if (anchorFragIdx + i >= FragmentsMap.Length ||
+    //wordstartIndex >= wordSearchEnd)
+    //                break; // safe bounds exit
 
-                if (score < baseScore * 0.9)
+    //            var fragTrigramsBefore = GetFragmentTrigrams(anchorFragIdx-i, anchorFragIdx);
+    //            int desiredLengthBefore = (int)(fragTrigramsBefore.Length * 1.2);
+
+    //            // Clamp length so we never go out of bounds
+    //            int maxAvailableBefore = wordSearchStart;
+    //            int safeLengthBefore = desiredLengthBefore > maxAvailableBefore
+    //                ? maxAvailableBefore
+    //                : desiredLengthBefore;
+
+    //            if (safeLengthBefore <= 0)
+    //                continue;
+
+
+                var wordTrigrams = wordsTrigrams.AsSpan(wordstartIndex, safeLengthNext);
+
+                int score = FuzzyScoringAlgorithms.ScoreJaccard(fragTrigramsNext, wordTrigrams);
+
+                if (score < baseScore*0.9)
                     return false;
             }
 
@@ -485,19 +539,16 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
 
         public List<WordGap> wordGaps = new List<WordGap>();
         public List<FragmentGap> fragmentGaps = new List<FragmentGap>();
-
         public class WordGap
         {
             public int StartWordIndex;
             public int EndWordIndex;
         }
-
         public class FragmentGap
         {
             public int StartFragmentIndex;
             public int EndFragmentIndex;
         }
-
         public void AddAndMergeWordGap(int start, int end)
         {
             // 1. Find the first gap that ends after or at the new start - 1 (potential neighbor)
@@ -519,7 +570,6 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
             // 3. Insert the final merged result at the correct sorted position
             wordGaps.Insert(i, new WordGap { StartWordIndex = start, EndWordIndex = end });
         }
-
         public void AddAndMergeFragmentGap(int start, int end)
         {
             // 1. Find the first gap that ends after or at the new start - 1 (potential neighbor)
@@ -541,8 +591,7 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
             // 3. Insert the final merged result at the correct sorted position
             fragmentGaps.Insert(i, new FragmentGap { StartFragmentIndex = start, EndFragmentIndex = end });
         }
-
-        public void AlignMicroSegments(AlignmentJob job)
+public void AlignMicroSegments(AlignmentJob job)
         {
             int lastWordIndex = job.WordStartIndex;
             int wordIndex = job.WordStartIndex;
@@ -584,7 +633,7 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
                         wordIndex = backupResult.index;
                         result = MatchFragmentAtWordIndex(wordIndex, i, job.WordEndIndex);
 
-                        ApplyMatch(i, wordIndex, result.wordCount);
+                        AplyMatch(i, wordIndex, result.wordCount);
                         wordIndex += result.wordCount; // Advance the index
 
                         continue; // <--- CRITICAL FIX: Skip the rest of the loop for this fragment
@@ -604,13 +653,12 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
                 else
                 {
                     LogOutcome(i, LogLevel.Green, $"Aligned (Score: {result.score}%)", wordIndex, FragmentsMap[i], result.wordCount);
-                    ApplyMatch(i, wordIndex, result.wordCount);
+                    AplyMatch(i, wordIndex, result.wordCount);
                     wordIndex += result.wordCount;
                 }
             }
         }
-
-        public void ApplyMatch(int i, int wordIndex, int wordCount)
+        public void AplyMatch(int i, int wordIndex,int wordCount)
         {
             var MatchedFragment = TranscriptSegments[i];
             for (int j = wordIndex; j < wordCount + wordIndex; j++)
@@ -620,6 +668,25 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
             wordIndex += wordCount;
         }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
         // Algorithm 
 
         public (int wordCount, int score) MatchFragmentAtWordIndex(
@@ -627,24 +694,23 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
             int fragmentIndex,
             int maxWordIndex)
         {
-            // Get the bytes for the fragment (single fragment)
-            var anchorBytes = GetFragmentBytes(fragmentIndex, fragmentIndex + 1);
-            int anchorLen = anchorBytes.Length;
-            int EndWordIndex = Math.Min(maxWordIndex, startWordIndex + (anchorLen)); // Rough estimate: 5 bytes per word
+            // Get the trigrams for the fragment (single fragment)
+            var anchorTrigrams = GetFragmentTrigrams(fragmentIndex, fragmentIndex);
+            int anchorLen = anchorTrigrams.Length;
+            var anchorBytes = GetFragmentBytes(fragmentIndex, fragmentIndex);
+            int EndWordIndex = Math.Min(maxWordIndex,startWordIndex+(2*anchorLen));
 
             int bestScore = 0;
             int bestWordCount = 0;
 
-            for (int i = 1; i <= EndWordIndex - startWordIndex; i++)
+
+            for (int i = 0; i < EndWordIndex - startWordIndex; i++)
             {
                 var wordBytes = GetWordBytes(startWordIndex, startWordIndex + i);
                 int score = FuzzyScoringAlgorithms.ScoreJaccard(anchorBytes, wordBytes);
+                if (wordBytes.EndsWith(DotCode))score += 10; // Bonus for ending on a sentence boundary
 
-                // Check if the word bytes end with a sentence boundary (period)
-                if (wordBytes.Length > 0 && wordBytes[wordBytes.Length - 1] == DotCode)
-                    score += 10; // Bonus for ending on a sentence boundary
-
-                if (score > bestScore)
+                if ( score > bestScore)
                 {
                     bestScore = score;
                     bestWordCount = i;
@@ -653,7 +719,11 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
             return (bestWordCount, bestScore);
         }
 
+
+
         //Helpers
+
+
 
         private ReadOnlySpan<byte> GetWordBytes(
             int firstWordIndexInclusive,
@@ -672,6 +742,23 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
 
             return words.AsSpan(byteStart, byteEndExclusive - byteStart);
         }
+        private ReadOnlySpan<ushort> GetWordTrigrams(
+            int firstWordIndexInclusive,
+            int lastWordIndexInclusive)
+        {
+            lastWordIndexInclusive = Math.Min(lastWordIndexInclusive, WordsMap.Length - 1);
+
+            if (firstWordIndexInclusive > lastWordIndexInclusive)
+                throw new ArgumentException("firstWordIndexInclusive must be <= lastWordIndexInclusive");
+
+            var firstWord = WordsMap[firstWordIndexInclusive];
+            int trigramStart = firstWord.TrigramStart;
+
+            var lastWord = WordsMap[lastWordIndexInclusive];
+            int trigramEndExclusive = lastWord.TrigramEnd;
+
+            return wordsTrigrams.AsSpan(trigramStart, trigramEndExclusive - trigramStart);
+        }
 
         private ReadOnlySpan<byte> GetFragmentBytes(
             int firstFragmentIndexInclusive,
@@ -688,6 +775,25 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
 
             return fragments.AsSpan(byteStart, byteEndExclusive - byteStart);
         }
+        private ReadOnlySpan<ushort> GetFragmentTrigrams(
+            int firstFragmentIndexInclusive,
+            int lastFragmentIndexInclusive)
+        {
+            if (firstFragmentIndexInclusive > lastFragmentIndexInclusive)
+                throw new ArgumentException("firstFragmentIndexInclusive must be <= lastFragmentIndexInclusive");
+
+            var firstFragment = FragmentsMap[firstFragmentIndexInclusive];
+            int trigramStart = firstFragment.TrigramStart;
+
+            var lastFragment = FragmentsMap[lastFragmentIndexInclusive];
+            int trigramEndExclusive = lastFragment.TrigramEnd;
+
+            return fragmentsTrigrams.AsSpan(trigramStart, trigramEndExclusive - trigramStart);
+        }
+
+
+
+
 
         private static string DecodeRange(ReadOnlySpan<byte> bytes)
         {
@@ -711,24 +817,39 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
             return new string(chars);
         }
 
+
+
+
+
+
+
+
+
+
         //Logging
 
-        private static readonly ConcurrentQueue<LogEntry> _logs = new ConcurrentQueue<LogEntry>();
+        private static readonly ConcurrentQueue<LogEntry> _logs
+    = new ConcurrentQueue<LogEntry>();
+
+
 
         private void LogOutcome(
-            int fragmentIndex,
-            LogLevel level,
-            string message,
-            int wordPos,
-            AlingmentMapper fragmentMap,
-            int matchedWordCount = 0,
-            bool isSystemMessage = false)
+    int fragmentIndex,
+    LogLevel level,
+    string message,
+    int wordPos,
+    AlingmentMapper fragmentMap,
+    int matchedWordCount = 0,
+    bool isSystemMessage = false)
         {
+
             var wordsBuffer = words;
             var wordsMap = WordsMap;
 
+
             if (level < MinLogLevel)
                 return;
+
 
             const int contextRadius = 50;
 
@@ -758,5 +879,7 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
 
             _logs.Enqueue(entry);
         }
+
+
     }
 }
