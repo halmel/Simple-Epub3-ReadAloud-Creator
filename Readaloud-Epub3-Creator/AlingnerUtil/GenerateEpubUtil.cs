@@ -9,7 +9,7 @@ namespace Readaloud_Epub3_Creator
 {
     public class GenerateEpubUtilSettings
     {
-        public ITranscriptionScript TranscriptionScript { get; set; }
+        public required ITranscriptionScript TranscriptionScript { get; set; }
     }
     public class GenerateEpubUtil
     {
@@ -61,7 +61,7 @@ namespace Readaloud_Epub3_Creator
             }
 
             // 4. Process Transcript
-            List<Root> transcript = JsonConvert.DeserializeObject<List<Root>>(transcriptionRaw);
+            List<Root> transcript = JsonConvert.DeserializeObject<List<Root>>(transcriptionRaw) ?? throw new ArgumentNullException(nameof(transcriptionRaw));
             foreach (var item in transcript)
             {
                 item.LinkSegments();
@@ -97,7 +97,7 @@ namespace Readaloud_Epub3_Creator
             Directory.CreateDirectory(smilPath);
 
             NormalizeSegmentsToFullMp3Length(words);
-            GenerateSmilFiles(words, smilPath);
+            SmilGenerator.GenerateSmilFiles(words, smilPath);
 
             // 7. Final Rebuild
             List<HtmlTextSegment> recombinedSegments = RecombineWordsIntoTextSegments(words);
@@ -262,24 +262,27 @@ namespace Readaloud_Epub3_Creator
 
         public static void TagWordsWithSmilSpans(List<WordSegment> words)
         {
+            // Group by file first
             var byFile = words.GroupBy(w => w.FileName);
-            int globalSentenceCounter = 0;
+
+            // This counter must start at 0 and increment exactly 
+            // the same way as the SmilGenerator to ensure IDs match.
+            int globalSyncCounter = 0;
 
             foreach (var fileGroup in byFile)
             {
-                string fileName = fileGroup.Key;
-
-                // Group by unique segment ID key
+                // 1. Group by the unique audio segment (matching SmilGenerator logic)
                 var bySegmentGroup = fileGroup
-                    .GroupBy(w => string.Join(",", w.LinkedSegments.Select(s => $"{s.FileId}_seg-{s.IndexInList}")))
+                    .GroupBy(w => string.Join(";", w.LinkedSegments.Select(s => $"{s.FileId}_{s.IndexInList}")))
                     .ToList();
 
                 foreach (var segmentGroup in bySegmentGroup)
                 {
-                    // Skip group if all words have no linked segments
+                    // Skip words that aren't linked to audio
                     if (segmentGroup.All(w => w.LinkedSegments == null || w.LinkedSegments.Count == 0))
                         continue;
 
+                    // 2. Group by sentence index within this segment
                     var bySentence = segmentGroup
                         .GroupBy(w => w.SentenceIndex)
                         .OrderBy(g => g.Key)
@@ -288,39 +291,29 @@ namespace Readaloud_Epub3_Creator
                     foreach (var sentenceGroup in bySentence)
                     {
                         var sentenceWords = sentenceGroup.OrderBy(w => w.IndexInList).ToList();
-                        if (sentenceWords.Count == 0)
-                            continue;
+                        if (sentenceWords.Count == 0) continue;
 
                         var first = sentenceWords.First();
                         var last = sentenceWords.Last();
 
-                        if (first.SentenceIndex == -1)
-                        {
+                        // 3. Apply the simplified naming scheme
+                        // ID format: id-sentence0, id-sentence1, etc.
+                        string spanId = $"id-sentence{globalSyncCounter}";
 
-                            // Include both global and local index in the span ID
-                            string spanId3 = $"id-sentence{globalSentenceCounter}";
+                        // Inject the span tags into the Word strings
+                        first.Word = $"<span id=\"{spanId}\">{first.Word}";
+                        last.Word += "</span>";
 
-                            first.Word = $"<span id=\"{spanId3}\">{first.Word}";
-                            last.Word += "</span>";
-
-                        }
-                        else
-                        {
-                            // Include both global and local index in the span ID
-                            string spanId = $"id-sentence{globalSentenceCounter}-{first.SentenceIndex}";
-
-                            first.Word = $"<span id=\"{spanId}\">{first.Word}";
-                            last.Word += "</span>";
-
-                        }
-
-
+                        // 4. Increment the counter for every sync unit (sentence group)
+                        globalSyncCounter++;
                     }
-                    globalSentenceCounter++;
                 }
             }
-        }
 
+            Console.WriteLine($"[OK] Tagged {globalSyncCounter} spans across all files.");
+        }
+    
+        
 
 
 
@@ -351,23 +344,48 @@ namespace Readaloud_Epub3_Creator
                     continue;
                 }
 
+                // 1. Get all segments physically located between the start and end of the gap
                 var inBetweenSegments = segments
                     .Where(s => s.IndexInList >= gap.StartSegmentIndex + 1 && s.IndexInList <= gap.EndSegmentIndex - 1)
                     .ToList();
 
+                // Case A: No segments found between the gap indices
                 if (inBetweenSegments.Count == 0)
                 {
+                    var fallbackSegment = segments[gap.StartSegmentIndex];
                     foreach (var item in gap.AffectedWords)
                     {
-                        item.LinkedSegments.Add(segments[gap.StartSegmentIndex]);
+                        // Ensure we don't mix FileIds if the word already had segments
+                        if (item.LinkedSegments.Count > 0 && item.LinkedSegments[0].FileId != fallbackSegment.FileId)
+                        {
+                            // If FileId differs, we overwrite to maintain consistency
+                            item.LinkedSegments = new List<Fragment> { fallbackSegment };
+                        }
+                        else if (!item.LinkedSegments.Any(s => s.IndexInList == fallbackSegment.IndexInList))
+                        {
+                            item.LinkedSegments.Add(fallbackSegment);
+                        }
+
                         words[item.IndexInList].LinkedSegments = item.LinkedSegments;
                     }
                     continue;
                 }
 
+                // Case B: Segments exist in the gap. 
+                // We must group them by FileId to satisfy the requirement that a word 
+                // only links to segments with the same FileId.
+                var segmentsByFile = inBetweenSegments.GroupBy(s => s.FileId).ToList();
+
+                // We take the first group of segments (the first FileId encountered)
+                // This ensures the list assigned to the word is homogeneous.
+                var validFileGroup = segmentsByFile.First().ToList();
+
                 foreach (var word in gap.AffectedWords)
                 {
-                    word.LinkedSegments = new List<Fragment>(inBetweenSegments);
+                    // Assign the homogeneous list to the word
+                    word.LinkedSegments = new List<Fragment>(validFileGroup);
+
+                    // Sync with the main list
                     words[word.IndexInList].LinkedSegments = word.LinkedSegments;
                 }
             }
@@ -379,63 +397,63 @@ namespace Readaloud_Epub3_Creator
         public static List<AudioLinkGap> CollectAudioLinkGaps(List<WordSegment> words)
         {
             var gaps = new List<AudioLinkGap>();
-            AudioLinkGap currentGap = null;
+            AudioLinkGap? currentGap = null;
 
-            Fragment previousSegment = null;
+            int previousIndex = -1;   // -1 = no previous segment
+            bool hasPrevious = false;
 
-            for (int i = 0; i < words.Count; i++)
+            foreach (var word in words)
             {
-                var word = words[i];
-                var currentSegment = word.LinkedSegments != null && word.LinkedSegments.Count > 0
-                    ? word.LinkedSegments[0]
-                    : null;
+                bool hasSegment = TryGetFirstSegmentIndex(word, out int currentIndex);
 
-                bool isNull = currentSegment == null;
-                bool isGap = false;
+                bool isGap = hasPrevious && hasSegment && (currentIndex - previousIndex > 1);
 
-                if (!isNull && previousSegment != null)
+                if (!hasSegment || isGap)
                 {
-                    int diff = currentSegment.IndexInList - previousSegment.IndexInList;
-                    isGap = diff > 1;  // any non-continuous jump
-                }
-
-                if (isNull || isGap)
-                {
-                    if (currentGap == null)
-                    {
-                        currentGap = new AudioLinkGap
+                    currentGap ??= new AudioLinkGap
                         {
-                            StartSegmentIndex = previousSegment?.IndexInList ?? -1,
+                            StartSegmentIndex = hasPrevious ? previousIndex : -1,
                             IsGap = isGap
                         };
-                    }
 
                     currentGap.AffectedWords.Add(word);
 
-                    // end the gap immediately if it's a segment jump
-                    if (!isNull && isGap)
+                    // close immediately on jump
+                    if (isGap && hasSegment)
                     {
-                        currentGap.EndSegmentIndex = currentSegment.IndexInList;
+                        currentGap.EndSegmentIndex = currentIndex;
                         gaps.Add(currentGap);
                         currentGap = null;
                     }
                 }
                 else if (currentGap != null)
                 {
-                    currentGap.EndSegmentIndex = currentSegment.IndexInList;
+                    currentGap.EndSegmentIndex = currentIndex;
                     gaps.Add(currentGap);
                     currentGap = null;
                 }
 
-                if (!isNull)
-                    previousSegment = currentSegment;
+                if (hasSegment)
+                {
+                    previousIndex = currentIndex;
+                    hasPrevious = true;
+                }
             }
 
             return gaps;
         }
 
+        private static bool TryGetFirstSegmentIndex(WordSegment word, out int index)
+        {
+            if (word.LinkedSegments != null && word.LinkedSegments.Count > 0)
+            {
+                index = word.LinkedSegments[0].IndexInList;
+                return true;
+            }
 
-
+            index = default;
+            return false;
+        }
 
 
 

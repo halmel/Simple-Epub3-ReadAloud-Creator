@@ -5,10 +5,11 @@ using System.IO;
 using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using System.Xml;
-using static Readaloud_Epub3_Creator.TranscriptClass;
 using static Readaloud_Epub3_Creator.AlingnerUtil.AlingnerNew;
+using static Readaloud_Epub3_Creator.TranscriptClass;
 
 
 // Rebuild the EPUB by replacing HTML content with edited HtmlDocuments
@@ -256,12 +257,12 @@ namespace Readaloud_Epub3_Creator
 
 
 
-        public class HtmlContainer
-        {
-            public string FileName { get; set; } // HTML file this came from
-            public HtmlDocument OriginalDocument { get; set; }
-            public List<HtmlTextSegment> Segments { get; set; } = new();
-        }
+        //public class HtmlContainer
+        //{
+        //    public string FileName { get; set; } // HTML file this came from
+        //    public HtmlDocument OriginalDocument { get; set; }
+        //    public List<HtmlTextSegment> Segments { get; set; } = new();
+        //}
 
         public class HtmlTextSegment
         {
@@ -455,228 +456,6 @@ namespace Readaloud_Epub3_Creator
         }
 
 
-        public class SmilPar
-        {
-            public string Id { get; set; }
-            public List<int> SentenceIndices { get; set; } = new();
-            public string SegmentFileName { get; set; }
-            public double ClipBegin { get; set; }
-            public double ClipEnd { get; set; }
-
-            public string ToXml()
-            {
-                var sb = new StringBuilder();
-                sb.AppendLine($"  <par id=\"{Id}\">");
-
-                foreach (var idx in SentenceIndices)
-                {
-                    sb.AppendLine($"    <text src=\"../{SegmentFileName}#id-{Id}-SentanceIndex-{idx}\"/>");
-                }
-
-                sb.AppendLine($"    <audio src=\"../Audio/{SegmentFileName}\" clipBegin=\"{ClipBegin:F3}s\" clipEnd=\"{ClipEnd:F3}s\"/>");
-                sb.AppendLine($"  </par>");
-
-                return sb.ToString();
-            }
-        }
-
-        public static void GenerateSmilFiles(List<WordSegment> words,
-                 string outputDirectory = "output")
-        {
-            string audioFolder = "../Audio/";
-            Directory.CreateDirectory(outputDirectory);
-
-            // 🧹 Clean up old SMIL files before generating new ones
-            foreach (var oldSmilFile in Directory.GetFiles(outputDirectory, "overlay_*.smil"))
-            {
-                try
-                {
-                    File.Delete(oldSmilFile);
-                    Console.WriteLine($"[CLEAN] Deleted old SMIL: {oldSmilFile}");
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[WARN] Failed to delete {oldSmilFile}: {ex.Message}");
-                }
-            }
-
-
-
-
-
-
-
-
-            var groupedByFile = words
-                .Where(w => w.LinkedSegments?.Count > 0)
-                .GroupBy(w => w.FileName)
-                .ToList();
-
-            int parGlobalCounter = 0;
-            string previousSegmentGroupKey = null;
-            double PreviousEndTime = 0;
-
-            foreach (var fileGroup in groupedByFile)
-            {
-                string fileName = fileGroup.Key;
-                string htmlRef = $"../{fileName}";
-                string smilFileName = Path.Combine(outputDirectory, $"overlay_{Path.GetFileNameWithoutExtension(fileName)}.smil");
-
-                var smilContent = new StringBuilder();
-
-                // Calculate total length for this file by summing all segment lengths
-                double totalLengthSeconds = 0;
-
-                var groupedByFileId = fileGroup
-                    .Where(w => w.LinkedSegments != null && w.LinkedSegments.Count > 0)
-                    .GroupBy(w => w.LinkedSegments[0].FileId);
-
-                foreach (var group in groupedByFileId)
-                {
-                    var allSegments = group
-                        .SelectMany(w => w.LinkedSegments)
-                        .Where(s => s.FileId == group.Key)
-                        .ToList();
-
-                    var firstSegment = allSegments.OrderBy(s => s.Start).First();
-                    var lastSegment = allSegments.OrderByDescending(s => s.End).First();
-
-                    totalLengthSeconds += lastSegment.End - firstSegment.Start;
-                }
-
-
-                // Add the total length comment before the <smil> tag
-                smilContent.AppendLine($"<!-- TotalLength: {totalLengthSeconds} seconds -->");
-
-                // Start SMIL file
-                smilContent.AppendLine(@"<smil xmlns=""http://www.w3.org/ns/SMIL"" xmlns:epub=""http://www.idpf.org/2007/ops"" version=""3.0"">");
-                smilContent.AppendLine("  <body>");
-                smilContent.AppendLine($"    <seq id=\"id_overlay_{Path.GetFileNameWithoutExtension(fileName)}\" epub:textref=\"{htmlRef}\" epub:type=\"chapter\">");
-
-                var bySegmentSet = fileGroup
-                    .GroupBy(w => string.Join(";", w.LinkedSegments.Select(s => $"{s.FileId}_{s.IndexInList}")))
-                    .ToList();
-
-
-
-
-
-                double FileEnd = fileGroup.ToList().First(x => x.LinkedSegments.Count > 0).LinkedSegments[0].FileLength;
-
-
-
-
-
-
-
-
-                foreach (var segmentGroup in bySegmentSet)
-                {
-
-                    string currentSegmentGroupKey = string.Join(";", segmentGroup.SelectMany(w => w.LinkedSegments)
-    .Select(s => $"{s.FileId}")
-    .Distinct());
-
-                    bool isSameGroupAsBefore = currentSegmentGroupKey == previousSegmentGroupKey;
-
-                    if (!isSameGroupAsBefore)
-                    {
-                        // If the new segmentGroup is a new logical group, reset
-                        PreviousEndTime = 0;
-                    }
-
-                    previousSegmentGroupKey = currentSegmentGroupKey;
-
-
-
-
-
-                    var wordsWithSameSegments = segmentGroup.ToList();
-                    List<IGrouping<int, WordSegment>> sentenceGroups = wordsWithSameSegments
-                        .GroupBy(w => w.SentenceIndex)
-                        .OrderBy(g => g.Key)
-                        .ToList();
-
-                    var allSegments = wordsWithSameSegments.SelectMany(w => w.LinkedSegments).Distinct().ToList();
-                    var firstSeg = allSegments.OrderBy(s => s.IndexInList).First();
-                    var lastSeg = allSegments.OrderBy(s => s.IndexInList).Last();
-
-                    string audioSrc = $"{audioFolder}{firstSeg.FileId}";
-                    if (PreviousEndTime == 0)
-                    {
-                        PreviousEndTime = firstSeg.Start;
-                    }
-                    double clipBegin = PreviousEndTime;
-
-                    double clipEnd = 0;
-
-                    double totalChars = sentenceGroups.Sum(g => g.Sum(ws => (ws.Word ?? string.Empty).Length));
-
-                    double overallStart = sentenceGroups.First().First().LinkedSegments.First().Start;
-                    double overallEnd = sentenceGroups.Last().Last().LinkedSegments.Last().End;
-                    double totalAvailableSpan = overallEnd - overallStart;
-
-                    for (int i = 0; i < sentenceGroups.Count; i++)
-                    {
-                        IGrouping<int, WordSegment> group = sentenceGroups[i];
-                        double groupChars = group.Sum(ws => (ws.Word ?? string.Empty).Length);
-
-                        if (sentenceGroups.Count == 1)
-                        {
-                            if (clipEnd != 0)
-                            {
-                                clipBegin = clipEnd;
-
-                            }
-                            clipEnd = group.Last().LinkedSegments.Last().End;
-
-                        }
-                        else
-                        {
-                            if (clipEnd != 0)
-                            {
-                                clipBegin = clipEnd;
-
-                            }
-                            clipEnd = clipBegin + totalAvailableSpan * (groupChars /totalChars);
-                        }
-
-
-                        if (group.Key == -1)
-                        {
-                            string textRef = $"../{fileName}#id-sentence{parGlobalCounter}";
-
-                            smilContent.AppendLine($"      <par id=\"sentence{parGlobalCounter}\">");
-                            smilContent.AppendLine($"        <text src=\"{textRef}\"/>");
-                            smilContent.AppendLine($"        <audio src=\"{audioSrc}\" clipBegin=\"{ToSmilTime(clipBegin)}\" clipEnd=\"{ToSmilTime(clipEnd)}\"/>");
-                            smilContent.AppendLine("      </par>");
-
-                        }
-                        else
-                        {
-                            string textRef = $"../{fileName}#id-sentence{parGlobalCounter}-{group.Key}";
-                            smilContent.AppendLine($"      <par id=\"sentence{parGlobalCounter}\">");
-                            smilContent.AppendLine($"        <text src=\"{textRef}\"/>");
-                            smilContent.AppendLine($"        <audio src=\"{audioSrc}\" clipBegin=\"{ToSmilTime(clipBegin)}\" clipEnd=\"{ToSmilTime(clipEnd)}\"/>");
-                            smilContent.AppendLine("      </par>");
-                        }
-                    }
-                    PreviousEndTime = clipEnd;
-                    parGlobalCounter++;
-                }
-
-                // End SMIL file
-                smilContent.AppendLine("    </seq>");
-                smilContent.AppendLine("  </body>");
-                smilContent.AppendLine("</smil>");
-
-                File.WriteAllText(smilFileName, smilContent.ToString());
-                Console.WriteLine($"[OK] Generated SMIL: {smilFileName}");
-            }
-
-            Console.WriteLine($"[DONE] SMIL generation complete: {groupedByFile.Count} file(s), {parGlobalCounter} <par> blocks total.");
-        }
-
         public static void NormalizeSegmentsToFullMp3Length(List<WordSegment> words)
         {
             // Find all unique fileIds across all linked segments
@@ -721,15 +500,6 @@ namespace Readaloud_Epub3_Creator
 
 
 
-        public static string ToSmilTime(double timeInSeconds)
-        {
-            timeInSeconds = Math.Round(timeInSeconds, 3, MidpointRounding.AwayFromZero);
-            return timeInSeconds
-                .ToString("0.###", CultureInfo.InvariantCulture) + "s";
-        }
-
-
-
 
 
 
@@ -739,17 +509,24 @@ namespace Readaloud_Epub3_Creator
 
         public static void SaveWordSegments(List<WordSegment> words, string path)
         {
-            var options = new JsonSerializerOptions { WriteIndented = true };
-            File.WriteAllText(path, JsonSerializer.Serialize(words, options));
-        }
+            var options = new JsonSerializerOptions
+            {
+                WriteIndented = true,
+                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+            };
 
+            string json = JsonSerializer.Serialize(words, options);
+            File.WriteAllText(path, json);
+        }
 
         public static List<WordSegment> LoadWordSegments(string path)
         {
-            if (!File.Exists(path))
-                return null;
+            if (!File.Exists(path)) return null;
 
-            return JsonSerializer.Deserialize<List<WordSegment>>(File.ReadAllText(path));
+            string json = File.ReadAllText(path);
+            if (string.IsNullOrWhiteSpace(json)) return new List<WordSegment>();
+
+            return JsonSerializer.Deserialize<List<WordSegment>>(json);
         }
 
 
@@ -804,57 +581,57 @@ namespace Readaloud_Epub3_Creator
             return grouped.ToList();
         }
 
-        public class WordSegmentCollection
-        {
-            private readonly List<WordSegment> _segments;
+        //public class WordSegmentCollection
+        //{
+        //    private readonly List<WordSegment> _segments;
 
-            // Stores the mapping of character indices to WordSegment indices
-            private List<(int startCharIndex, int endCharIndex, int wordIndex)> _charIndexMap;
+        //    // Stores the mapping of character indices to WordSegment indices
+        //    private List<(int startCharIndex, int endCharIndex, int wordIndex)> _charIndexMap;
 
-            public WordSegmentCollection(List<WordSegment> segments)
-            {
-                _segments = segments ?? throw new ArgumentNullException(nameof(segments));
-                WordSegment.AssignListIndices(_segments);
-            }
+        //    public WordSegmentCollection(List<WordSegment> segments)
+        //    {
+        //        _segments = segments ?? throw new ArgumentNullException(nameof(segments));
+        //        WordSegment.AssignListIndices(_segments);
+        //    }
 
-            public string GetSubSequenceString(int startIndex, int length, out List<int> wordCharStartIndices)
-            {
-                if (startIndex < 0 || startIndex >= _segments.Count || length <= 0)
-                    throw new ArgumentOutOfRangeException();
+        //    public string GetSubSequenceString(int startIndex, int length, out List<int> wordCharStartIndices)
+        //    {
+        //        if (startIndex < 0 || startIndex >= _segments.Count || length <= 0)
+        //            throw new ArgumentOutOfRangeException();
 
-                int endIndex = Math.Min(startIndex + length, _segments.Count);
-                _charIndexMap = new List<(int, int, int)>();
-                wordCharStartIndices = new List<int>();
+        //        int endIndex = Math.Min(startIndex + length, _segments.Count);
+        //        _charIndexMap = new List<(int, int, int)>();
+        //        wordCharStartIndices = new List<int>();
 
-                var sb = new System.Text.StringBuilder();
-                int currentCharIndex = 0;
+        //        var sb = new System.Text.StringBuilder();
+        //        int currentCharIndex = 0;
 
-                for (int i = startIndex; i < endIndex; i++)
-                {
-                    var word = _segments[i].Word;
-                    wordCharStartIndices.Add(currentCharIndex);
-                    sb.Append(word);
-                    _charIndexMap.Add((currentCharIndex, currentCharIndex + word.Length - 1, i));
-                    currentCharIndex += word.Length;
-                }
+        //        for (int i = startIndex; i < endIndex; i++)
+        //        {
+        //            var word = _segments[i].Word;
+        //            wordCharStartIndices.Add(currentCharIndex);
+        //            sb.Append(word);
+        //            _charIndexMap.Add((currentCharIndex, currentCharIndex + word.Length - 1, i));
+        //            currentCharIndex += word.Length;
+        //        }
 
-                return sb.ToString();
-            }
+        //        return sb.ToString();
+        //    }
 
-            public int GetWordIndexContainingChar(int charIndex)
-            {
-                if (_charIndexMap == null || !_charIndexMap.Any())
-                    throw new InvalidOperationException("Call GetSubSequenceString first to initialize index mapping.");
+        //    public int GetWordIndexContainingChar(int charIndex)
+        //    {
+        //        if (_charIndexMap == null || !_charIndexMap.Any())
+        //            throw new InvalidOperationException("Call GetSubSequenceString first to initialize index mapping.");
 
-                foreach (var (start, end, wordIndex) in _charIndexMap)
-                {
-                    if (charIndex >= start && charIndex <= end)
-                        return wordIndex;
-                }
+        //        foreach (var (start, end, wordIndex) in _charIndexMap)
+        //        {
+        //            if (charIndex >= start && charIndex <= end)
+        //                return wordIndex;
+        //        }
 
-                throw new ArgumentOutOfRangeException(nameof(charIndex), "Character index is out of bounds.");
-            }
-        }
+        //        throw new ArgumentOutOfRangeException(nameof(charIndex), "Character index is out of bounds.");
+        //    }
+        //}
 
 
 

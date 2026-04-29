@@ -1,15 +1,9 @@
-﻿using F23.StringSimilarity;
-using FuzzySharp;
-using FuzzySharp.SimilarityRatio.Scorer;
-using ModernWpf.Controls.Primitives;
+﻿using FuzzySharp;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.IO;
-using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
-using System.Windows.Documents.DocumentStructures;
-using static Readaloud_Epub3_Creator.AlingnerOld;
 using static Readaloud_Epub3_Creator.EpubUtility;
 using static Readaloud_Epub3_Creator.TranscriptClass;
 
@@ -18,29 +12,24 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
     public class AlingnerNew
     {
         public string WordPath { get; set; }
-
         public string LogPath { get; set; }
-
         public LogLevel MinLogLevel { get; set; } = LogLevel.Green;
 
         public List<WordSegment> BookSegments { get; set; }
         public List<Fragment> TranscriptSegments { get; set; }
 
-        public byte[] words { get; set; }
+        // Core arrays: now char[] instead of byte[]
+        // The debugger will now ignore this property in the Watch/Locals windows
+        public char[] words { get; }
         public AlingmentMapper[] WordsMap { get; set; }
-
         public AlingmentMapper[] WordsSentances { get; set; }
-
-        public byte[] fragments { get; set; }
+        // The debugger will now ignore this property in the Watch/Locals windows
+        public char[] fragments { get; }
         public AlingmentMapper[] FragmentsMap { get; set; }
 
-        private const byte SpaceCode = 26;
-        private const byte DotCode = 27;
-        private const int AlphabetSize = 28;
-        private const int Base2 = AlphabetSize * AlphabetSize;
-
         public AlingnerNew(ref List<WordSegment> bookSegments,
-                           ref List<Fragment> transcriptSegments, string wordPath, string logPath)
+                           ref List<Fragment> transcriptSegments,
+                           string wordPath, string logPath)
         {
             WordPath = wordPath;
             LogPath = logPath;
@@ -50,105 +39,102 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
 
             WordsMap = new AlingmentMapper[BookSegments.Count];
             for (int i = 0; i < BookSegments.Count; i++)
-            {
                 WordsMap[i] = new AlingmentMapper();
-            }
-            words = BuildByteArray(BookSegments, WordsMap, s => s.NormalizedWord);
+
+            words = BuildCharArray(BookSegments, WordsMap, s => s.NormalizedWord);
 
             FragmentsMap = new AlingmentMapper[TranscriptSegments.Count];
             for (int i = 0; i < TranscriptSegments.Count; i++)
-            {
                 FragmentsMap[i] = new AlingmentMapper();
-            }
-            fragments = BuildByteArray(TranscriptSegments, FragmentsMap, s => s.NormalizedText);
+
+            fragments = BuildCharArray(TranscriptSegments, FragmentsMap, s => s.NormalizedText);
 
             WordsSentances = BuildSentenceMapFromWords();
         }
 
-        private AlingmentMapper[] BuildSentenceMapFromWords()
+        public class AlingmentMapper
         {
-            List<AlingmentMapper> sentences = new();
+            public int StartId;
+            public int EndId;
+            public int ListIndex;
 
-            int? sentenceStartChar = null;
-            int sentenceStartWord = 0;
-            int sentenceIndex = 0;
-
-            for (int i = 0; i < WordsMap.Length; i++)
+            public int Length
             {
-                var word = WordsMap[i];
-
-                if (sentenceStartChar == null)
+                get
                 {
-                    sentenceStartChar = word.StartId;
-                    sentenceStartWord = i;
-                }
-
-                bool isEnd = word.EndId > word.StartId &&
-                             words[word.EndId - 1] == DotCode;
-
-                if (isEnd)
-                {
-                    sentences.Add(new AlingmentMapper
-                    {
-                        StartId = sentenceStartChar.Value,
-                        EndId = word.EndId,
-                        ListIndex = sentenceIndex++,
-                        FirstWordIndex = sentenceStartWord,
-                        LastWordIndex = i
-                    });
-
-                    sentenceStartChar = null;
+                    return EndId - StartId;
                 }
             }
 
-            return sentences.ToArray();
+            public int FirstWordIndex;//sentance only
+            public int LastWordIndex;//sentance only
         }
 
-        private static byte[] BuildByteArray<T>(
+        // ------------------------------------------------------------
+        // Build a flat char[] from segments, inserting spaces between
+        // words when needed (same logic as the original byte version).
+        // ------------------------------------------------------------
+        private static char[] BuildCharArray<T>(
             List<T> segments,
             AlingmentMapper[] map,
-            Func<T, string> selector)
-            where T : class
+            Func<T, string> selector) where T : class
         {
-            // Precalculate total length
-            int totalLength = 0;
-            foreach (var seg in segments)
-                totalLength += selector(seg).Length;
-
-            List<byte> result = new();
+            var result = new List<char>();
             int pos = 0;
-            bool lastWasSpace = true;
-            StringBuilder sb = new StringBuilder();
-            foreach (dynamic segment in segments)
-            {
-                string text = selector(segment);
-                if (text.Length != 0 && lastWasSpace == false && char.IsWhiteSpace(text.First()) == false && text.First() != '.') { text = " " + text; }
-                if (text.Length != 0 && char.IsWhiteSpace(text.Last()))
-                {
-                    lastWasSpace = true;
-                }
-                else
-                {
-                    lastWasSpace = false;
-                }
-                //sb.Append(text);
-                map[segment.IndexInList] = new AlingmentMapper
-                {
-                    StartId = pos,
-                    EndId = pos + text.Length,
-                    ListIndex = segment.IndexInList
-                };
-                pos = pos + text.Length;
+            bool lastWasSpace = true;   // start of text → no leading space
 
-                for (int i = 0; i < text.Length; i++)
-                    result.Add(MapChar(text[i]));
+            foreach (var segment in segments)
+            {
+                string text = selector(segment);            // already normalized
+                int segIndex = (segment as dynamic).IndexInList;
+
+                if (string.IsNullOrEmpty(text))
+                {
+                    // Empty segment: still record its (zero-length) position
+                    map[segIndex] = new AlingmentMapper
+                    {
+                        StartId = pos,
+                        EndId = pos,
+                        ListIndex = segIndex
+                    };
+                    continue;
+                }
+
+                // Should we insert a space before this segment?
+                if (!lastWasSpace && text[0] != '.')
+                {
+                    result.Add(' ');
+                    pos++;
+                }
+
+                // Record the start position for this segment
+                int startPos = pos;
+
+                // Append all characters of the normalized text
+                foreach (char ch in text)
+                    result.Add(ch);
+
+                pos += text.Length;
+
+                // Record the end position
+                map[segIndex] = new AlingmentMapper
+                {
+                    StartId = startPos,
+                    EndId = pos,
+                    ListIndex = segIndex
+                };
+
+                // Normalized text never ends with a space, so lastWasSpace becomes false
+                lastWasSpace = false;
             }
-            //var x = sb.ToString();
-            //Console.WriteLine(x);
+
             return result.ToArray();
         }
 
-        // Optional: Fast normalization without Regex
+        // ------------------------------------------------------------
+        // Normalisation: letters → lowercase, non‑letters become spaces
+        // (except '.' which is kept), multiple spaces collapsed.
+        // ------------------------------------------------------------
         public static string NormalizeText(string text)
         {
             if (string.IsNullOrWhiteSpace(text))
@@ -170,76 +156,137 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
                     buffer[pos++] = ch;
                     lastWasSpace = false;
                 }
-                else if (char.IsPunctuation(ch))
+                else if (ch == '.' || ch == ',')
                 {
                     buffer[pos++] = '.';
                     lastWasSpace = false;
                 }
-                else
-                    if (!lastWasSpace)
-                    {
-                        buffer[pos++] = ' ';
-                        lastWasSpace = true;
-                    }
-            }
-
-            return new string(buffer[..(lastWasSpace && pos > 0 ? pos - 1 : pos)]);
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static byte MapChar(char c)
-        {
-            if (c >= 'A' && c <= 'Z')
-                c = (char)(c + 32);
-
-            if (c >= 'a' && c <= 'z')
-                return (byte)(c - 'a');
-
-            if (char.IsWhiteSpace(c))
-                return SpaceCode;
-
-            if (c == '.')
-                return DotCode;
-
-            return SpaceCode;
-        }
-
-        public class AlingmentMapper
-        {
-            public int StartId;
-            public int EndId;
-            public int ListIndex;
-
-            public int Length
-            {
-                get
+                else if (!lastWasSpace)
                 {
-                    return EndId - StartId;
+                    buffer[pos++] = ' ';
+                    lastWasSpace = true;
                 }
             }
 
-            public int FirstWordIndex;//sentance only
-            public int LastWordIndex;//sentance only
+            // Trim trailing space
+            return new string(buffer[..(lastWasSpace && pos > 0 ? pos - 1 : pos)]);
         }
 
-        //´Main program
+        // ------------------------------------------------------------
+        // Sentence detection – uses '.' directly instead of a byte code.
+        // ------------------------------------------------------------
+        private AlingmentMapper[] BuildSentenceMapFromWords()
+        {
+            var sentences = new List<AlingmentMapper>();
 
+            int? sentenceStartChar = null;
+            int sentenceStartWord = 0;
+            int sentenceIndex = 0;
 
+            for (int i = 0; i < WordsMap.Length; i++)
+            {
+                var word = WordsMap[i];
+
+                if (sentenceStartChar == null)
+                {
+                    sentenceStartChar = word.StartId;
+                    sentenceStartWord = i;
+                }
+
+                // Does this word end with a period?
+                bool isEnd = word.EndId > word.StartId &&
+                             words[word.EndId - 1] == '.';
+
+                if (isEnd)
+                {
+                    sentences.Add(new AlingmentMapper
+                    {
+                        StartId = sentenceStartChar.Value,
+                        EndId = word.EndId,
+                        ListIndex = sentenceIndex++,
+                        FirstWordIndex = sentenceStartWord,
+                        LastWordIndex = i
+                    });
+
+                    sentenceStartChar = null;
+                }
+            }
+
+            return sentences.ToArray();
+        }
+
+        // ------------------------------------------------------------
+        // Helper spans over the flat char arrays.
+        // ------------------------------------------------------------
+        private ReadOnlySpan<char> GetWordChars(int firstWordInclusive, int lastWordInclusive)
+        {
+            lastWordInclusive = Math.Min(lastWordInclusive, WordsMap.Length - 1);
+            if (firstWordInclusive > lastWordInclusive)
+                throw new ArgumentException("firstWordInclusive must be <= lastWordInclusive");
+
+            var firstWord = WordsMap[firstWordInclusive];
+            var lastWord = WordsMap[lastWordInclusive];
+            return words.AsSpan(firstWord.StartId, lastWord.EndId - firstWord.StartId);
+        }
+
+        private ReadOnlySpan<char> GetFragmentChars(int firstFragmentInclusive, int lastFragmentInclusive)
+        {
+            if (firstFragmentInclusive > lastFragmentInclusive)
+                throw new ArgumentException("firstFragmentInclusive must be <= lastFragmentInclusive");
+
+            var firstFragment = FragmentsMap[firstFragmentInclusive];
+            var lastFragment = FragmentsMap[lastFragmentInclusive];
+            return fragments.AsSpan(firstFragment.StartId, lastFragment.EndId - firstFragment.StartId);
+        }
+        /// <summary>
+        /// Returns how many items (starting from startIndex) are needed to reach or exceed the targetCharLength.
+        /// </summary>
+        private int GetCountToReachLength(AlingmentMapper[] map, int startIndex, int targetCharLength)
+        {
+            // Ensure we have at least one element to look at, and we aren't at the very last index
+            if (map == null || startIndex < 0 || startIndex >= map.Length - 1)
+                return 0;
+
+            int accumulatedLength = 0;
+            int count = 0;
+
+            // We stop at map.Length - 1 to ensure (startIndex + count) is always a valid index
+            for (int i = startIndex; i < map.Length - 1; i++)
+            {
+                accumulatedLength += map[i].Length;
+                count++;
+
+                if (accumulatedLength >= targetCharLength)
+                    break;
+            }
+
+            return count;
+        }
+
+        // Public Wrappers for the three ID types:
+        private const int DEFAULT_LENGHT = 50;
+        public int GetFragmentCountForLength(int startFragmentId, int targetLength = DEFAULT_LENGHT)
+            => GetCountToReachLength(FragmentsMap, startFragmentId, targetLength);
+
+        public int GetWordCountForLength(int startWordId, int targetLength = DEFAULT_LENGHT )
+            => GetCountToReachLength(WordsMap, startWordId, targetLength);
+
+        public int GetSentenceCountForLength(int startSentenceId, int targetLength = DEFAULT_LENGHT)
+            => GetCountToReachLength(WordsSentances, startSentenceId, targetLength);
+
+        // ------------------------------------------------------------
+        // Alignment job splitting and anchor finding.
+        // ------------------------------------------------------------
         public class AlignmentJob
         {
-            // The range in the BookSegments list
             public int WordStartIndex { get; set; }
             public int WordEndIndex { get; set; }
-
             public int WordCount => WordEndIndex - WordStartIndex;
 
-            // The range in the TranscriptSegments list
             public int FragmentStartIndex { get; set; }
             public int FragmentEndIndex { get; set; }
-
             public int FragmentCount => FragmentEndIndex - FragmentStartIndex;
         }
-
 
         public void RunAlingment()
         {
@@ -251,7 +298,7 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
                 FragmentEndIndex = TranscriptSegments.Count - 1
             };
 
-            Stack<AlignmentJob> jobQueue = new Stack<AlignmentJob>();
+            var jobQueue = new Stack<AlignmentJob>();
             jobQueue.Push(rootJob);
 
             while (jobQueue.Count > 0)
@@ -259,61 +306,65 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
                 Console.WriteLine(jobQueue.Count);
                 var currentJob = jobQueue.Pop();
 
-                // BASE CASE: If the job is small enough, use the high-precision algorithm
-                if (currentJob.FragmentCount <= 50) // Adjust threshold as needed
+                if (currentJob.FragmentCount <= 100)
                 {
                     AlignMicroSegments(currentJob);
                     continue;
                 }
 
-                var Jobs = SplitJobIntoSmallerOnesByFindingAnchors(currentJob);
-                foreach (var job in Jobs)
-                    jobQueue.Push(job);
+                var subJobs = SplitJobIntoSmallerOnesByFindingAnchors(currentJob);
+                if (subJobs.Count <= 1)
+                {
+                    AlignMicroSegments(currentJob);
+                }
+                else
+                {
+                    // Push subjobs in reverse order so they are processed start-to-finish
+                    for (int i = subJobs.Count - 1; i >= 0; i--)
+                    {
+                        jobQueue.Push(subJobs[i]);
+                    }
+                }
             }
+
             SaveWordSegments(BookSegments, WordPath);
-            // Save logs as JSON
+
             var options = new JsonSerializerOptions { WriteIndented = true };
             string json = JsonSerializer.Serialize(_logs, options);
             if (File.Exists(LogPath))
-            {
                 File.Delete(LogPath);
-            }
-            System.IO.File.WriteAllText(LogPath, json);
-
+            File.WriteAllText(LogPath, json);
         }
 
         private List<AlignmentJob> SplitJobIntoSmallerOnesByFindingAnchors(AlignmentJob job)
         {
             var subJobs = new List<AlignmentJob>();
-            const int searchAttempts = 5; // How many anchors we try to find across the job
+             int searchAttempts = (int)job.FragmentCount/50;
 
+            var anchors = new List<(int FragIdx, int WordIdx)>
+            {
+                (job.FragmentStartIndex, job.WordStartIndex)
+            };
 
-            var anchors = new List<(int FragIdx, int WordIdx)>();
-            anchors.Add((job.FragmentStartIndex, job.WordStartIndex));
-
-            int step = (job.FragmentCount) / (searchAttempts + 1);
+            int step = job.FragmentCount / (searchAttempts + 1);
 
             for (int i = 1; i <= searchAttempts; i++)
             {
                 int startFragIdx = job.FragmentStartIndex + (i * step);
+                var result = FindFragmentSequenceMatchInWordRange(
+                    startFragIdx,
+                    Math.Max(job.WordStartIndex,job.WordStartIndex+ (job.WordCount/searchAttempts*2)),
+                    job.WordEndIndex,
+                    35);
 
-
-                // Search for this sequence of fragments in the word range
-                var result = FindFragmentSequenceMatchInWordRange(startFragIdx, Math.Max(anchors.Last().WordIdx - (int)(step * 0.5), job.WordStartIndex), job.WordEndIndex, 70);
-
-                if (result.score > 50)
+                if (result.score > 80 && ValidateExpansion(result.score,startFragIdx,result.bestWord))
                 {
-                    // Only add if it's chronologically after the last found anchor
-                    if (result.bestWord > anchors.Last().WordIdx)
-                    {
-                        anchors.Add((startFragIdx, result.bestWord));
-                    }
+                    anchors.Add((startFragIdx, result.bestWord));
                 }
             }
 
             anchors.Add((job.FragmentEndIndex, job.WordEndIndex));
 
-            // Create the sub-jobs
             for (int i = 0; i < anchors.Count - 1; i++)
             {
                 subJobs.Add(new AlignmentJob
@@ -328,54 +379,36 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
             return subJobs;
         }
 
-        private const int EXPANSION_DEPTH = 2;          // Hard-coded configurable
-        private const int EXPANSION_PASS_SCORE = 35;    // Minimum score required per expansion fragment
+        private const int EXPANSION_PASS_SCORE = 75;
 
-        private (int bestWord, int score)
-        FindFragmentSequenceMatchInWordRange(
+        private (int bestWord, int score) FindFragmentSequenceMatchInWordRange(
             int startFragIdx,
             int wordSearchStart,
             int wordSearchEnd,
             int requiredQuickExitScore)
         {
-            var anchorBytes = GetFragmentBytes(startFragIdx, startFragIdx + 1);
-            int anchorLen = anchorBytes.Length;
+            // 1. LONG WINDOW: Keep this as-is for high-confidence identification
+            var anchorChars = GetFragmentChars(startFragIdx, startFragIdx + GetFragmentCountForLength(startFragIdx));
+            string anchorStr = new string(anchorChars);
+            int anchorLen = anchorChars.Length;
 
             int bestSentenceIdx = -1;
             int bestSentenceScore = 0;
 
-            // ----------------------------
-            // PHASE 1 — Sentence coarse scan + ValidateExpansion
-            // ----------------------------
+            // Phase 1 – Coarse Scan (Unchanged)
             for (int s = 0; s < WordsSentances.Length; s++)
             {
                 var sentence = WordsSentances[s];
+                int sentanceCount = GetSentenceCountForLength(s);
+                int sentenceLenght = WordsSentances[s + sentanceCount].EndId - sentence.StartId;
 
-                // Skip sentences outside word search range
-                if (sentence.LastWordIndex < wordSearchStart)
-                    continue;
-                if (sentence.FirstWordIndex >= wordSearchEnd)
-                    break;
+                if (sentence.FirstWordIndex < wordSearchStart - 100) continue;
+                if (WordsSentances[s + sentanceCount].EndId > wordSearchEnd + 100) break;
 
-                int byteStart = sentence.StartId;
+                var sentenceSpan = words.AsSpan(sentence.StartId, sentenceLenght);
+                int score = Fuzz.Ratio(anchorStr, new string(sentenceSpan));
 
-                int desiredLength = (int)(anchorLen * 1.2);
-                int maxAvailable = words.Length - byteStart;
-                int safeLength = desiredLength > maxAvailable
-                    ? maxAvailable
-                    : desiredLength;
-
-                if (safeLength <= 0)
-                    continue;
-
-                var span = words.AsSpan(byteStart, safeLength);
-                int score = FuzzyScoringAlgorithms.ScoreJaccard(anchorBytes, span);
-
-                // 🔥 Apply ValidateExpansion on sentence level
-                if (score >= EXPANSION_PASS_SCORE &&
-                    ValidateExpansion(score, startFragIdx,
-                                      sentence.FirstWordIndex,
-                                      wordSearchStart, wordSearchEnd))
+                if (score >= EXPANSION_PASS_SCORE && ValidateExpansion(score, startFragIdx, sentence.FirstWordIndex, 500))
                 {
                     if (score > bestSentenceScore)
                     {
@@ -385,163 +418,118 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
                 }
             }
 
-            if (bestSentenceIdx == -1)
+            if (bestSentenceIdx == -1 || bestSentenceScore < EXPANSION_PASS_SCORE)
                 return (-1, 0);
 
-            // ----------------------------
-            // PHASE 2 — Word-level sliding within padded sentence
-            // ----------------------------
+            // Phase 2 – Long-Window Sliding to find exact start (Unchanged)
             var bestSentence = WordsSentances[bestSentenceIdx];
-
-            int paddingBytes = anchorLen; // bytes padding
-
-            int searchWordStart = Math.Max(wordSearchStart,
-                bestSentence.FirstWordIndex - (paddingBytes / 5)); // Rough estimate: 5 bytes per word average
-
-            int searchWordEnd = Math.Min(wordSearchEnd,
-                bestSentence.LastWordIndex + (paddingBytes / 5));
+            int searchWordStart = Math.Max(wordSearchStart, bestSentence.FirstWordIndex - 20);
+            int searchWordEnd = Math.Min(wordSearchEnd, bestSentence.LastWordIndex + 20);
 
             int bestScore = 0;
             int bestWord = -1;
-            int noImprovementCounter = 0;
-
-            int windowByteLength = (int)(anchorLen * 1.2);
+            int windowLength = (int)(anchorLen * 1.1);
 
             for (int w = searchWordStart; w <= searchWordEnd; w++)
             {
-                int byteStart = WordsMap[w].StartId;
+                int charStart = WordsMap[w].StartId;
+                if (charStart + windowLength > words.Length) break;
 
-                if (byteStart + windowByteLength > words.Length)
-                    break;
+                var span = words.AsSpan(charStart, windowLength);
+                int score = Fuzz.WeightedRatio(anchorStr, new string(span));
 
-                var span = words.AsSpan(byteStart, windowByteLength);
-                int score = FuzzyScoringAlgorithms.ScoreJaccard(anchorBytes, span);
-
-                if (score >= EXPANSION_PASS_SCORE &&
-                    ValidateExpansion(score, startFragIdx, w,
-                                      wordSearchStart, wordSearchEnd))
+                if (score >= bestScore)
                 {
-                    if (score > bestScore)
-                    {
-                        bestScore = score;
-                        bestWord = w;
-                        noImprovementCounter = 0;
-                    }
+                    bestScore = score;
+                    bestWord = w;
                 }
-                else
-                {
-                    noImprovementCounter++;
-                }
+            }
 
-                if (noImprovementCounter > 45 && bestScore > requiredQuickExitScore)
-                    break;
+            if (bestWord != -1)
+            {
+                // 2. SHORT MATCH: Now find the actual length of just the CURRENT fragment 
+                // starting at the bestWord we just found.
+                var shortMatch = MatchFragmentAtWordIndex(bestWord, startFragIdx, wordSearchEnd);
+
+                LogOutcome(
+                    fragmentIndex: startFragIdx,
+                    level: LogLevel.Green,
+                    message: $"Anchor found at word {bestWord} (Sentence {bestSentenceIdx}). Long-window score: {bestScore}%.",
+                    wordPos: bestWord,
+                    fragmentMap: FragmentsMap[startFragIdx],
+                    matchedWordCount: shortMatch.wordCount);
+            }
+            if (bestScore < 75)
+            {
+                Console.WriteLine($"!!! LOW SCORE DETECTED at Word {bestWord} (Score: {bestScore}) !!!");
+                System.Diagnostics.Debug.WriteLine("Investigating low score match...");
             }
 
             return (bestWord, bestScore);
         }
-
-        private bool ValidateExpansion(
-            int baseScore,
-            int anchorFragIdx,
-            int anchorWordIdx,
-            int wordSearchStart,
-            int wordSearchEnd)
+        public int GetSafeExpansionLength(int desiredLength, int wordStartChar, int wordSearchEnd)
         {
-            int wordStartByte = WordsMap[anchorWordIdx].StartId;
+            int maxAvailable = wordSearchEnd - wordStartChar;
+            return desiredLength > maxAvailable ? maxAvailable : desiredLength;
+        }
 
-            // Forward validation
-            for (int i = 1; i <= EXPANSION_DEPTH; i++)
-            {
-                if (anchorFragIdx + i >= FragmentsMap.Length ||
-                    anchorWordIdx + i >= WordsMap.Length ||
-                    wordStartByte >= wordSearchEnd)
-                    break; // safe bounds exit
+        private const int EXPANSION_DEPTH = 100;
+        private bool ValidateExpansion(int baseScore, int anchorFragIdx, int anchorWordIdx, int ExpamsionDepht = EXPANSION_DEPTH)
+        {
+                string fText = new string(GetFragmentChars(anchorFragIdx,anchorFragIdx + GetFragmentCountForLength(anchorFragIdx, ExpamsionDepht)));
+            int x = GetWordCountForLength(anchorWordIdx, ExpamsionDepht);
+                string wText = new string(GetWordChars(anchorWordIdx, anchorWordIdx + x));
 
-                var fragBytesNext = GetFragmentBytes(anchorFragIdx, anchorFragIdx + i + 1);
-                int desiredLengthNext = (int)(fragBytesNext.Length * 1.2);
-
-                // Get byte range for the next words
-                int nextWordStartByte = WordsMap[anchorWordIdx + i].StartId;
-
-                // Clamp length so we never go out of bounds
-                int maxAvailableNext = wordSearchEnd - nextWordStartByte;
-                int safeLengthNext = desiredLengthNext > maxAvailableNext
-                    ? maxAvailableNext
-                    : desiredLengthNext;
-
-                if (safeLengthNext <= 0)
-                    continue;
-
-                var wordBytes = words.AsSpan(nextWordStartByte, safeLengthNext);
-
-                int score = FuzzyScoringAlgorithms.ScoreJaccard(fragBytesNext, wordBytes);
-
-                if (score < baseScore * 0.9)
-                    return false;
-            }
-
+                int score = Fuzz.Ratio(fText, wText);
+                if (score < baseScore*0.9) return false;
+            
             return true;
         }
 
+        // ------------------------------------------------------------
+        // Gap tracking (unchanged)
+        // ------------------------------------------------------------
         public List<WordGap> wordGaps = new List<WordGap>();
         public List<FragmentGap> fragmentGaps = new List<FragmentGap>();
 
-        public class WordGap
-        {
-            public int StartWordIndex;
-            public int EndWordIndex;
-        }
-
-        public class FragmentGap
-        {
-            public int StartFragmentIndex;
-            public int EndFragmentIndex;
-        }
+        public class WordGap { public int StartWordIndex; public int EndWordIndex; }
+        public class FragmentGap { public int StartFragmentIndex; public int EndFragmentIndex; }
 
         public void AddAndMergeWordGap(int start, int end)
         {
-            // 1. Find the first gap that ends after or at the new start - 1 (potential neighbor)
-            int i = 0;
-            while (i < wordGaps.Count && wordGaps[i].EndWordIndex < start - 1)
-            {
-                i++;
-            }
+            wordGaps.Add(new WordGap { StartWordIndex = start, EndWordIndex = end });
+            wordGaps = wordGaps.OrderBy(g => g.StartWordIndex).ToList();
 
-            // 2. Merge overlapping/adjacent wordGaps into our new range
-            while (i < wordGaps.Count && wordGaps[i].StartWordIndex <= end + 1)
+            for (int i = 0; i < wordGaps.Count - 1; i++)
             {
-                start = Math.Min(start, wordGaps[i].StartWordIndex);
-                end = Math.Max(end, wordGaps[i].EndWordIndex);
-                wordGaps.RemoveAt(i);
-                // We don't increment 'i' because the next element shifts down to the current index
+                if (wordGaps[i].EndWordIndex >= wordGaps[i + 1].StartWordIndex - 1)
+                {
+                    wordGaps[i].EndWordIndex = Math.Max(wordGaps[i].EndWordIndex, wordGaps[i + 1].EndWordIndex);
+                    wordGaps.RemoveAt(i + 1);
+                    i--;
+                }
             }
-
-            // 3. Insert the final merged result at the correct sorted position
-            wordGaps.Insert(i, new WordGap { StartWordIndex = start, EndWordIndex = end });
         }
 
         public void AddAndMergeFragmentGap(int start, int end)
         {
-            // 1. Find the first gap that ends after or at the new start - 1 (potential neighbor)
-            int i = 0;
-            while (i < fragmentGaps.Count && fragmentGaps[i].EndFragmentIndex < start - 1)
-            {
-                i++;
-            }
+            fragmentGaps.Add(new FragmentGap { StartFragmentIndex = start, EndFragmentIndex = end });
+            fragmentGaps = fragmentGaps.OrderBy(g => g.StartFragmentIndex).ToList();
 
-            // 2. Merge overlapping/adjacent fragmentGaps into our new range
-            while (i < fragmentGaps.Count && fragmentGaps[i].StartFragmentIndex <= end + 1)
+            for (int i = 0; i < fragmentGaps.Count - 1; i++)
             {
-                start = Math.Min(start, fragmentGaps[i].StartFragmentIndex);
-                end = Math.Max(end, fragmentGaps[i].EndFragmentIndex);
-                fragmentGaps.RemoveAt(i);
-                // We don't increment 'i' because the next element shifts down to the current index
+                if (fragmentGaps[i].EndFragmentIndex >= fragmentGaps[i + 1].StartFragmentIndex - 1)
+                {
+                    fragmentGaps[i].EndFragmentIndex = Math.Max(fragmentGaps[i].EndFragmentIndex, fragmentGaps[i + 1].EndFragmentIndex);
+                    fragmentGaps.RemoveAt(i + 1);
+                    i--;
+                }
             }
-
-            // 3. Insert the final merged result at the correct sorted position
-            fragmentGaps.Insert(i, new FragmentGap { StartFragmentIndex = start, EndFragmentIndex = end });
         }
 
+        // ------------------------------------------------------------
+        // Micro‑alignment (now uses FuzzySharp)
+        // ------------------------------------------------------------
         public void AlignMicroSegments(AlignmentJob job)
         {
             int lastWordIndex = job.WordStartIndex;
@@ -549,19 +537,15 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
 
             for (int i = job.FragmentStartIndex; i < job.FragmentEndIndex; i++)
             {
-                var result = MatchFragmentAtWordIndex(
-                    wordIndex,
-                    i,
-                    job.WordEndIndex);
+                var result = MatchFragmentAtWordIndex(wordIndex, i, job.WordEndIndex);
 
-                // --- BACKUP STRATEGY TRIGGER ---
-                if (result.score < 50 && TranscriptSegments[i].NormalizedText.Length > 0)
+                // Backup strategy if score too low
+                if (result.score < 60 && TranscriptSegments[i].NormalizedText.Length > 0)
                 {
                     (int index, int score) backupResult = (0, 0);
 
-                    // Try heavier fuzzy matching
-                    var test = FindFragmentSequenceMatchInWordRange(i, wordIndex, job.WordEndIndex, 80);
-                    if (test.score > 50)
+                    var test = FindFragmentSequenceMatchInWordRange(i, wordIndex, job.WordEndIndex, 60);
+                    if (test.score > 60)
                         backupResult = (test.bestWord, 9999);
                     else
                     {
@@ -571,9 +555,9 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
 
                     if (backupResult.score > 0)
                     {
-                        if ((backupResult.index - wordIndex) < 10)
+                        if (backupResult.index - wordIndex < 10)
                         {
-                            LogOutcome(i, LogLevel.Green, $"Backup match close enough to apply directly", backupResult.index, FragmentsMap[i], result.wordCount);
+                            LogOutcome(i, LogLevel.Green, "Backup match close enough to apply directly", backupResult.index, FragmentsMap[i], result.wordCount);
                         }
                         else
                         {
@@ -585,13 +569,15 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
                         result = MatchFragmentAtWordIndex(wordIndex, i, job.WordEndIndex);
 
                         ApplyMatch(i, wordIndex, result.wordCount);
-                        wordIndex += result.wordCount; // Advance the index
-
-                        continue; // <--- CRITICAL FIX: Skip the rest of the loop for this fragment
+                        wordIndex += result.wordCount;
+                        continue;
                     }
                 }
+                else
+                {
 
-                // --- STANDARD STRATEGY ---
+
+                // Standard handling
                 if (result.wordCount == 0 && TranscriptSegments[i].NormalizedText.Length == 0)
                 {
                     LogOutcome(i, LogLevel.Yellow, "Aligned empty fragment", wordIndex, FragmentsMap[i], 0);
@@ -599,7 +585,6 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
                 else if (result.wordCount == 0)
                 {
                     LogOutcome(i, LogLevel.Red, $"Total Failure at {i}", wordIndex, FragmentsMap[i], 0);
-                    // Optionally: wordIndex++; 
                 }
                 else
                 {
@@ -607,112 +592,65 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
                     ApplyMatch(i, wordIndex, result.wordCount);
                     wordIndex += result.wordCount;
                 }
+
+
+                }
             }
         }
 
         public void ApplyMatch(int i, int wordIndex, int wordCount)
         {
-            var MatchedFragment = TranscriptSegments[i];
+            var matchedFragment = TranscriptSegments[i];
             for (int j = wordIndex; j < wordCount + wordIndex; j++)
-            {
-                BookSegments[j].LinkedSegments.Add(MatchedFragment);
-            }
-            wordIndex += wordCount;
+                BookSegments[j].LinkedSegments.Add(matchedFragment);
         }
 
-        // Algorithm 
-
+        // ------------------------------------------------------------
+        // Try to match a single fragment against 1..N words
+        // ------------------------------------------------------------
         public (int wordCount, int score) MatchFragmentAtWordIndex(
             int startWordIndex,
             int fragmentIndex,
             int maxWordIndex)
         {
-            // Get the bytes for the fragment (single fragment)
-            var anchorBytes = GetFragmentBytes(fragmentIndex, fragmentIndex + 1);
-            int anchorLen = anchorBytes.Length;
-            int EndWordIndex = Math.Min(maxWordIndex, startWordIndex + (anchorLen)); // Rough estimate: 5 bytes per word
+            // Target is only the current fragment (Short Text)
+            var targetChars = GetFragmentChars(fragmentIndex, fragmentIndex);
+            string targetStr = new string(targetChars);
+
+            // Limit word search to a reasonable amount (e.g., 25 words) 
+            // instead of character length to avoid the "mathing too much" bug.
+            int wordLimit = Math.Min(maxWordIndex, startWordIndex + targetChars.Length);
 
             int bestScore = 0;
             int bestWordCount = 0;
 
-            for (int i = 1; i <= EndWordIndex - startWordIndex; i++)
+            for (int i = 1; i <= (wordLimit - startWordIndex); i++)
             {
-                var wordBytes = GetWordBytes(startWordIndex, startWordIndex + i);
-                int score = FuzzyScoringAlgorithms.ScoreJaccard(anchorBytes, wordBytes);
+                // Get words from startWordIndex to (startWordIndex + i - 1)
+                var wordChars = GetWordChars(startWordIndex, startWordIndex + i - 1);
+                int score = Fuzz.Ratio(targetStr, new string(wordChars));
 
-                // Check if the word bytes end with a sentence boundary (period)
-                if (wordBytes.Length > 0 && wordBytes[wordBytes.Length - 1] == DotCode)
-                    score += 10; // Bonus for ending on a sentence boundary
+                // Bonus if word chunk ends with punctuation (helps align boundaries)
+                if (wordChars.Length > 0 && (wordChars[wordChars.Length - 1] == '.' || wordChars[wordChars.Length - 1] == ','))
+                    score += 5;
 
-                if (score > bestScore)
+                if (score >= bestScore)
                 {
                     bestScore = score;
                     bestWordCount = i;
+                }
+                else if (score < bestScore - 20)
+                {
+                    // If the score starts dropping significantly, we've overshot the fragment
+                    break;
                 }
             }
             return (bestWordCount, bestScore);
         }
 
-        //Helpers
-
-        private ReadOnlySpan<byte> GetWordBytes(
-            int firstWordIndexInclusive,
-            int lastWordIndexInclusive)
-        {
-            lastWordIndexInclusive = Math.Min(lastWordIndexInclusive, WordsMap.Length - 1);
-
-            if (firstWordIndexInclusive > lastWordIndexInclusive)
-                throw new ArgumentException("firstWordIndexInclusive must be <= lastWordIndexInclusive");
-
-            var firstWord = WordsMap[firstWordIndexInclusive];
-            int byteStart = firstWord.StartId;
-
-            var lastWord = WordsMap[lastWordIndexInclusive];
-            int byteEndExclusive = lastWord.EndId;
-
-            return words.AsSpan(byteStart, byteEndExclusive - byteStart);
-        }
-
-        private ReadOnlySpan<byte> GetFragmentBytes(
-            int firstFragmentIndexInclusive,
-            int lastFragmentIndexInclusive)
-        {
-            if (firstFragmentIndexInclusive > lastFragmentIndexInclusive)
-                throw new ArgumentException("firstFragmentIndexInclusive must be <= lastFragmentIndexInclusive");
-
-            var firstFragment = FragmentsMap[firstFragmentIndexInclusive];
-            int byteStart = firstFragment.StartId;
-
-            var lastFragment = FragmentsMap[lastFragmentIndexInclusive];
-            int byteEndExclusive = lastFragment.EndId;
-
-            return fragments.AsSpan(byteStart, byteEndExclusive - byteStart);
-        }
-
-        private static string DecodeRange(ReadOnlySpan<byte> bytes)
-        {
-            int length = bytes.Length;
-            var chars = new char[length];
-
-            for (int i = 0; i < length; i++)
-            {
-                byte b = bytes[i];
-
-                if (b < 26)
-                    chars[i] = (char)('a' + b);
-                else if (b == 26)
-                    chars[i] = ' ';
-                else if (b == 27)
-                    chars[i] = '.';
-                else
-                    chars[i] = '@';
-            }
-
-            return new string(chars);
-        }
-
-        //Logging
-
+        // ------------------------------------------------------------
+        // Logging (adapted to char[] – simply create strings from spans)
+        // ------------------------------------------------------------
         private static readonly ConcurrentQueue<LogEntry> _logs = new ConcurrentQueue<LogEntry>();
 
         private void LogOutcome(
@@ -721,42 +659,64 @@ namespace Readaloud_Epub3_Creator.AlingnerUtil
             string message,
             int wordPos,
             AlingmentMapper fragmentMap,
-            int matchedWordCount = 0,
-            bool isSystemMessage = false)
+            int matchedWordCount = 0)
         {
-            var wordsBuffer = words;
-            var wordsMap = WordsMap;
 
-            if (level < MinLogLevel)
-                return;
+            string snippet = string.Empty;
+            string matchedText = string.Empty;
+            string targetText = string.Empty;
+            Console.WriteLine("------------------------------------------");
 
-            const int contextRadius = 50;
+                const int contextRadius = 50;
+                int startWord = Math.Max(0, wordPos - contextRadius);
+                int endWord = Math.Min(WordsMap.Length, wordPos + contextRadius);
 
-            int startWord = Math.Max(0, wordPos - contextRadius);
-            int endWord = Math.Min(wordsMap.Length, wordPos + contextRadius);
+                var snippetChars = GetWordChars(startWord, endWord);
+                snippet = new string(snippetChars);
+                Console.WriteLine("Context snippet text:    \n " + snippet);
+                var matchedChars = GetWordChars(wordPos, wordPos + matchedWordCount);
+                matchedText = new string(matchedChars);
+                 Console.WriteLine("Matched text:    \n " + matchedText);
 
-            var snippetBytes = GetWordBytes(startWord, endWord);
-            string snippet = DecodeRange(snippetBytes);
-
-            var matchedBytes = GetWordBytes(wordPos, wordPos + matchedWordCount);
-            string matchedText = DecodeRange(matchedBytes);
-
-            var fragmentBytes = GetFragmentBytes(fragmentIndex, fragmentIndex);
-            string targetText = DecodeRange(fragmentBytes);
-
+                var fragmentChars = GetFragmentChars(fragmentIndex, fragmentIndex);
+                targetText = new string(fragmentChars);
+                 Console.WriteLine("Target text:    \n "+targetText);
+            
+             Console.WriteLine("Message:\n"+message+"\n\n\n");
+            Console.WriteLine("------------------------------------------");
             var entry = new LogEntry
             {
                 FragmentIndex = fragmentIndex,
                 StartPos = wordPos,
                 Level = level,
-                Message = message,
+                Message =  message,
                 ContextSnippet = snippet,
                 MachedText = matchedText,
                 TargetText = targetText,
-                IsSystemMessage = isSystemMessage
+                IsSystemMessage = true
             };
 
             _logs.Enqueue(entry);
         }
+    }
+
+    // LogEntry definition (assumed to exist)
+    public class LogEntry
+    {
+        public required int FragmentIndex { get; set; }
+        public required int StartPos { get; set; }
+        public required LogLevel Level { get; set; }
+        public string Message { get; set; } = "No Message set";
+        public string ContextSnippet { get; set; }= "No Context Snippet set";
+        public string MachedText { get; set; } = "No Matched Text set";
+        public string TargetText { get; set; }= "No Target Text set";
+        public bool IsSystemMessage { get; set; } = false;
+    }
+
+    public enum LogLevel
+    {
+        Red,
+        Yellow,
+        Green
     }
 }

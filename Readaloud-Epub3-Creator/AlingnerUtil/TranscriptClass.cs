@@ -43,54 +43,45 @@ namespace Readaloud_Epub3_Creator
                 }
             }
         }
-
         public class Fragment
         {
             [JsonPropertyName("start")]
             public double Start { get; set; }
 
+            private double _end;
             [JsonPropertyName("end")]
-            public double End { get; set; }
+            public double End { get {
+                    if (_end < Start)
+                        Console.WriteLine("Test");
+                    return _end; } set { if (value < Start) 
+                        Console.WriteLine("Test");
+                    _end = value; } }
 
             [JsonPropertyName("text")]
             public string Text { get; set; } = string.Empty;
 
-            // --- Local helper properties (Not in JSON) ---
+            [JsonPropertyName("file_id")]
+            public string FileId { get; set; } = string.Empty;
 
-            [JsonIgnore] // Prevents errors if you ever serialize this back to JSON
+            [JsonPropertyName("index_in_list")]
+            public int IndexInList { get; set; }
+
+
+            [JsonPropertyName("file_length")]
             public double FileLength { get; set; }
 
             [JsonIgnore]
-            public string FileId { get; set; } = string.Empty;
-
-            [JsonIgnore]
-            public int IndexInList { get; set; }
-
-            [JsonIgnore]
             public string NormalizedText => NormalizeText(Text);
-
-            [JsonIgnore]
-
-            public int NormalizedLength => NormalizedText.Length;
-
-            [JsonIgnore]
-            public int NormArrayIndex { get; set; }
-            [JsonIgnore]
-            public int NormIndexIndexEnd { get { return NormArrayIndex + NormalizedLength; } }
-
-
-            public static void AssignListIndices(List<Fragment> words)
+            public static void AssignListIndices(List<Fragment> frags)
             {
                 int normIndex = 0;
-                for (int i = 0; i < words.Count; i++)
+                for (int i = 0; i < frags.Count; i++)
                 {
-                    words[i].IndexInList = i;
-                    words[i].NormArrayIndex = normIndex;
-                    normIndex += words[i].NormalizedLength;
+                    frags[i].IndexInList = i;
                 }
             }
-        }
 
+        }
         // Function to extract all segments and add fileId to each
         public static List<Fragment> ExtractSegmentsWithFileId(List<Root> roots)
         {
