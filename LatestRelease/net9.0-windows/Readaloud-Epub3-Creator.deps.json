@@ -8,6 +8,7 @@
     ".NETCoreApp,Version=v9.0": {
       "Readaloud-Epub3-Creator/1.0.0": {
         "dependencies": {
+          "CommunityToolkit.Mvvm": "8.4.2",
           "EpubSharp.dll": "1.1.5",
           "F23.StringSimilarity": "7.0.0",
           "FuzzySearch.Net": "1.1.0",
@@ -20,6 +21,14 @@
         },
         "runtime": {
           "Readaloud-Epub3-Creator.dll": {}
+        }
+      },
+      "CommunityToolkit.Mvvm/8.4.2": {
+        "runtime": {
+          "lib/net8.0/CommunityToolkit.Mvvm.dll": {
+            "assemblyVersion": "8.4.0.0",
+            "fileVersion": "8.4.2.1"
+          }
         }
       },
       "EpubSharp.dll/1.1.5": {
@@ -598,6 +607,13 @@
       "type": "project",
       "serviceable": false,
       "sha512": ""
+    },
+    "CommunityToolkit.Mvvm/8.4.2": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-WadCzGEc2U+3e20avRLng4qNtt4zoOGWrdUISqJWrHe3/FSnrYjuM5Sb4yQb09LhkBXrrI4Zt3dLKgRMbItsrg==",
+      "path": "communitytoolkit.mvvm/8.4.2",
+      "hashPath": "communitytoolkit.mvvm.8.4.2.nupkg.sha512"
     },
     "EpubSharp.dll/1.1.5": {
       "type": "package",
