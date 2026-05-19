@@ -1,7 +1,8 @@
+using Epub3MediaOverlays.Core;
 using System;
 using System.IO;
 using System.Windows;
-using static Epub3MediaOverlays.Core.Models.Book;
+
 
 namespace Epub3MediaOverlays.Wpf
 {

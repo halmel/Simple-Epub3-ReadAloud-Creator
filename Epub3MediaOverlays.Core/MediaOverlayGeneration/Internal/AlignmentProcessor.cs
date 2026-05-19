@@ -5,144 +5,116 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
-using static Epub3MediaOverlays.Core.Utilities.EpubUtility;
-using static Epub3MediaOverlays.Core.Utilities.TranscriptClass;
-using Fragment = Epub3MediaOverlays.Core.Utilities.TranscriptClass.Fragment;
+using Epub3MediaOverlays.Core.MediaOverlayGeneration.Models;
+using Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal;
 
-namespace Epub3MediaOverlays.Core.AlingnerUtil
+namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
 {
-    public class AlingnerNew
+    /// <summary>
+    /// Internal alignment processor that matches audio fragments to text segments.
+    /// Implements the core alignment algorithm using fuzzy matching and heuristic anchoring.
+    /// </summary>
+    internal class AlignmentProcessor
     {
         public string WordPath { get; set; }
         public string LogPath { get; set; }
         public LogLevel MinLogLevel { get; set; } = LogLevel.Green;
-
-        public AlingnerConfiguration Config { get; set; }
+        public AlignmentConfiguration Config { get; set; }
 
         public List<WordSegment> BookSegments { get; set; }
-        public List<Fragment> TranscriptSegments { get; set; }
+        public List<AudioFragment> TranscriptSegments { get; set; }
 
-        // Core arrays: now char[] instead of byte[]
-        // The debugger will now ignore this property in the Watch/Locals windows
         public char[] words { get; }
-        public AlingmentMapper[] WordsMap { get; set; }
-        public AlingmentMapper[] WordsSentances { get; set; }
+        public AlignmentMapper[] WordsMap { get; set; }
+        public AlignmentMapper[] WordsSentences { get; set; }
 
-        // The debugger will now ignore this property in the Watch/Locals windows
         public char[] fragments { get; }
-        public AlingmentMapper[] FragmentsMap { get; set; }
+        public AlignmentMapper[] FragmentsMap { get; set; }
 
-        public AlingnerNew(ref List<WordSegment> bookSegments,
-                           ref List<Fragment> transcriptSegments,
-                           string wordPath, string logPath,
-                           AlingnerConfiguration config = null)
+        public AlignmentProcessor(ref List<WordSegment> bookSegments,
+                                   ref List<AudioFragment> transcriptSegments,
+                                   string wordPath, string logPath,
+                                   AlignmentConfiguration config = null)
         {
             WordPath = wordPath;
             LogPath = logPath;
             MinLogLevel = LogLevel.Green;
-            Config = config ?? new AlingnerConfiguration();
+            Config = config ?? new AlignmentConfiguration();
             BookSegments = bookSegments;
             TranscriptSegments = transcriptSegments;
 
-            WordsMap = new AlingmentMapper[BookSegments.Count];
+            WordsMap = new AlignmentMapper[BookSegments.Count];
             for (int i = 0; i < BookSegments.Count; i++)
-                WordsMap[i] = new AlingmentMapper();
+                WordsMap[i] = new AlignmentMapper();
 
             words = BuildCharArray(BookSegments, WordsMap, s => s.NormalizedWord);
 
-            FragmentsMap = new AlingmentMapper[TranscriptSegments.Count];
+            FragmentsMap = new AlignmentMapper[TranscriptSegments.Count];
             for (int i = 0; i < TranscriptSegments.Count; i++)
-                FragmentsMap[i] = new AlingmentMapper();
+                FragmentsMap[i] = new AlignmentMapper();
 
             fragments = BuildCharArray(TranscriptSegments, FragmentsMap, s => s.NormalizedText);
-
-            WordsSentances = BuildSentenceMapFromWords();
+            WordsSentences = BuildSentenceMapFromWords();
         }
 
-        public class AlingmentMapper
+        public class AlignmentMapper
         {
             public int StartId;
             public int EndId;
             public int ListIndex;
 
-            public int Length
-            {
-                get
-                {
-                    return EndId - StartId;
-                }
-            }
-
-            public int FirstWordIndex; // sentance only
-            public int LastWordIndex;  // sentance only
+            public int Length => EndId - StartId;
+            public int FirstWordIndex;
+            public int LastWordIndex;
         }
 
-        // ------------------------------------------------------------
-        // Build a flat char[] from segments, inserting spaces between
-        // words when needed (same logic as the original byte version).
-        // ------------------------------------------------------------
         private static char[] BuildCharArray<T>(
             List<T> segments,
-            AlingmentMapper[] map,
+            AlignmentMapper[] map,
             Func<T, string> selector) where T : class
         {
             var result = new List<char>();
             int pos = 0;
-            bool lastWasSpace = true; // start of text → no leading space
+            bool lastWasSpace = true;
 
             foreach (var segment in segments)
             {
-                string text = selector(segment); // already normalized
+                string text = selector(segment);
                 int segIndex = (segment as dynamic).IndexInList;
 
                 if (string.IsNullOrEmpty(text))
                 {
-                    // Empty segment: still record its (zero-length) position
-                    map[segIndex] = new AlingmentMapper
-                    {
-                        StartId = pos,
-                        EndId = pos,
-                        ListIndex = segIndex
-                    };
+                    map[segIndex] = new AlignmentMapper { StartId = pos, EndId = pos, ListIndex = segIndex };
                     continue;
                 }
 
-                // Should we insert a space before this segment?
                 if (!lastWasSpace && text[0] != '.')
                 {
                     result.Add(' ');
                     pos++;
                 }
 
-                // Record the start position for this segment
                 int startPos = pos;
-
-                // Append all characters of the normalized text
                 foreach (char ch in text)
                     result.Add(ch);
 
                 pos += text.Length;
-
-                // Record the end position
-                map[segIndex] = new AlingmentMapper
+                map[segIndex] = new AlignmentMapper
                 {
                     StartId = startPos,
                     EndId = pos,
                     ListIndex = segIndex
                 };
 
-                // Normalized text never ends with a space, so lastWasSpace becomes false
                 lastWasSpace = false;
             }
 
             return result.ToArray();
         }
 
-        // ------------------------------------------------------------
-        // Normalisation: letters → lowercase, non-letters become spaces
-        // (except '.' and ',' which are kept as '.'),
-        // multiple spaces collapsed.
-        // ------------------------------------------------------------
+        /// <summary>
+        /// Normalizes text: lowercase letters kept, non-letters become spaces (except . and , which become .)
+        /// </summary>
         public static string NormalizeText(string text)
         {
             if (string.IsNullOrWhiteSpace(text))
@@ -176,17 +148,12 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
                 }
             }
 
-            // Trim trailing space
             return new string(buffer[..(lastWasSpace && pos > 0 ? pos - 1 : pos)]);
         }
 
-        // ------------------------------------------------------------
-        // Sentence detection – uses '.' directly instead of a byte code.
-        // ------------------------------------------------------------
-        private AlingmentMapper[] BuildSentenceMapFromWords()
+        private AlignmentMapper[] BuildSentenceMapFromWords()
         {
-            var sentences = new List<AlingmentMapper>();
-
+            var sentences = new List<AlignmentMapper>();
             int? sentenceStartChar = null;
             int sentenceStartWord = 0;
             int sentenceIndex = 0;
@@ -201,13 +168,11 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
                     sentenceStartWord = i;
                 }
 
-                // Does this word end with a period?
-                bool isEnd = word.EndId > word.StartId &&
-                             words[word.EndId - 1] == '.';
+                bool isEnd = word.EndId > word.StartId && words[word.EndId - 1] == '.';
 
                 if (isEnd)
                 {
-                    sentences.Add(new AlingmentMapper
+                    sentences.Add(new AlignmentMapper
                     {
                         StartId = sentenceStartChar.Value,
                         EndId = word.EndId,
@@ -223,9 +188,6 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
             return sentences.ToArray();
         }
 
-        // ------------------------------------------------------------
-        // Helper spans over the flat char arrays.
-        // ------------------------------------------------------------
         private ReadOnlySpan<char> GetWordChars(int firstWordInclusive, int lastWordInclusive)
         {
             lastWordInclusive = Math.Min(lastWordInclusive, WordsMap.Length - 1);
@@ -247,19 +209,14 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
             return fragments.AsSpan(firstFragment.StartId, lastFragment.EndId - firstFragment.StartId);
         }
 
-        /// <summary>
-        /// Returns how many items (starting from startIndex) are needed to reach or exceed the targetCharLength.
-        /// </summary>
-        private int GetCountToReachLength(AlingmentMapper[] map, int startIndex, int targetCharLength)
+        private int GetCountToReachLength(AlignmentMapper[] map, int startIndex, int targetCharLength)
         {
-            // Ensure we have at least one element to look at, and we aren't at the very last index
             if (map == null || startIndex < 0 || startIndex >= map.Length - 1)
                 return 0;
 
             int accumulatedLength = 0;
             int count = 0;
 
-            // We stop at map.Length - 1 to ensure (startIndex + count) is always a valid index
             for (int i = startIndex; i < map.Length - 1; i++)
             {
                 accumulatedLength += map[i].Length;
@@ -272,7 +229,6 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
             return count;
         }
 
-        // Public Wrappers for the three ID types:
         public int GetFragmentCountForLength(int startFragmentId, int targetLength = -1)
             => GetCountToReachLength(FragmentsMap, startFragmentId, targetLength > 0 ? targetLength : Config.DefaultSegmentLength);
 
@@ -280,11 +236,8 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
             => GetCountToReachLength(WordsMap, startWordId, targetLength > 0 ? targetLength : Config.DefaultSegmentLength);
 
         public int GetSentenceCountForLength(int startSentenceId, int targetLength = -1)
-            => GetCountToReachLength(WordsSentances, startSentenceId, targetLength > 0 ? targetLength : Config.DefaultSegmentLength);
+            => GetCountToReachLength(WordsSentences, startSentenceId, targetLength > 0 ? targetLength : Config.DefaultSegmentLength);
 
-        // ------------------------------------------------------------
-        // Alignment job splitting and anchor finding.
-        // ------------------------------------------------------------
         public class AlignmentJob
         {
             public int WordStartIndex { get; set; }
@@ -296,7 +249,7 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
             public int FragmentCount => FragmentEndIndex - FragmentStartIndex;
         }
 
-        public void RunAlingment()
+        public void RunAlignment()
         {
             var jobQueue = InitializeJobQueue();
 
@@ -316,6 +269,11 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
 
             FinalizeAlignment();
         }
+
+        /// <summary>
+        /// Alias for backward compatibility with existing code that calls RunAlingment.
+        /// </summary>
+        public void RunAlingment() => RunAlignment();
 
         private Stack<AlignmentJob> InitializeJobQueue()
         {
@@ -347,7 +305,6 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
                 return;
             }
 
-            // Push subjobs in reverse order so they are processed start-to-finish
             PushJobsInReverse(jobQueue, subJobs);
         }
 
@@ -359,7 +316,7 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
 
         private void FinalizeAlignment()
         {
-            SaveWordSegments(BookSegments, WordPath);
+            EpubProcessor.SaveWordSegments(BookSegments, WordPath);
 
             var options = new JsonSerializerOptions { WriteIndented = true };
             string json = JsonSerializer.Serialize(_logs, options);
@@ -378,14 +335,12 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
 
         private List<(int FragIdx, int WordIdx)> BuildAnchors(AlignmentJob job)
         {
-            var subJobs = new List<AlignmentJob>();
-            int searchAttempts = (int)job.FragmentCount / Config.AnchorSearchDivisor;
-
             var anchors = new List<(int FragIdx, int WordIdx)>
             {
                 (job.FragmentStartIndex, job.WordStartIndex)
             };
 
+            int searchAttempts = (int)job.FragmentCount / Config.AnchorSearchDivisor;
             int step = job.FragmentCount / (searchAttempts + 1);
 
             for (int i = 1; i <= searchAttempts; i++)
@@ -431,15 +386,12 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
             return subJobs;
         }
 
-        private const int EXPANSION_PASS_SCORE = 75;
-
         private (int bestWord, int score) FindFragmentSequenceMatchInWordRange(
             int startFragIdx,
             int wordSearchStart,
             int wordSearchEnd,
             int requiredQuickExitScore)
         {
-            // 1. LONG WINDOW: Keep this as-is for high-confidence identification
             var anchorChars = GetFragmentChars(startFragIdx, startFragIdx + GetFragmentCountForLength(startFragIdx));
             string anchorStr = new string(anchorChars);
             int anchorLen = anchorChars.Length;
@@ -447,17 +399,16 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
             int bestSentenceIdx = -1;
             int bestSentenceScore = 0;
 
-            // Phase 1 – Coarse Scan (Unchanged)
-            for (int s = 0; s < WordsSentances.Length; s++)
+            for (int s = 0; s < WordsSentences.Length; s++)
             {
-                var sentence = WordsSentances[s];
-                int sentanceCount = GetSentenceCountForLength(s);
-                int sentenceLenght = WordsSentances[s + sentanceCount].EndId - sentence.StartId;
+                var sentence = WordsSentences[s];
+                int sentenceCount = GetSentenceCountForLength(s);
+                int sentenceLength = WordsSentences[s + sentenceCount].EndId - sentence.StartId;
 
                 if (sentence.FirstWordIndex < wordSearchStart - Config.SentenceSearchBuffer) continue;
-                if (WordsSentances[s + sentanceCount].EndId > wordSearchEnd + Config.SentenceSearchBuffer) break;
+                if (WordsSentences[s + sentenceCount].EndId > wordSearchEnd + Config.SentenceSearchBuffer) break;
 
-                var sentenceSpan = words.AsSpan(sentence.StartId, sentenceLenght);
+                var sentenceSpan = words.AsSpan(sentence.StartId, sentenceLength);
                 int score = Fuzz.Ratio(anchorStr, new string(sentenceSpan));
 
                 if (score >= Config.ExpansionPassScore && ValidateExpansion(score, startFragIdx, sentence.FirstWordIndex, Config.AnchorValidationExpansionDepth))
@@ -473,8 +424,7 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
             if (bestSentenceIdx == -1 || bestSentenceScore < Config.ExpansionPassScore)
                 return (-1, 0);
 
-            // Phase 2 – Long-Window Sliding to find exact start (Unchanged)
-            var bestSentence = WordsSentances[bestSentenceIdx];
+            var bestSentence = WordsSentences[bestSentenceIdx];
             int searchWordStart = Math.Max(wordSearchStart, bestSentence.FirstWordIndex - Config.SearchWordRangeAdjustment);
             int searchWordEnd = Math.Min(wordSearchEnd, bestSentence.LastWordIndex + Config.SearchWordRangeAdjustment);
 
@@ -499,10 +449,7 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
 
             if (bestWord != -1)
             {
-                // 2. SHORT MATCH: Now find the actual length of just the CURRENT fragment
-                // starting at the bestWord we just found.
                 var shortMatch = MatchFragmentAtWordIndex(bestWord, startFragIdx, wordSearchEnd);
-
                 LogOutcome(
                     fragmentIndex: startFragIdx,
                     level: LogLevel.Green,
@@ -515,7 +462,6 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
             if (bestScore < 75)
             {
                 Console.WriteLine($"!!! LOW SCORE DETECTED at Word {bestWord} (Score: {bestScore}) !!!");
-                System.Diagnostics.Debug.WriteLine("Investigating low score match...");
             }
 
             return (bestWord, bestScore);
@@ -527,15 +473,13 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
             return desiredLength > maxAvailable ? maxAvailable : desiredLength;
         }
 
-        private const int EXPANSION_DEPTH = 100;
-
-        private bool ValidateExpansion(int baseScore, int anchorFragIdx, int anchorWordIdx, int ExpamsionDepht = -1)
+        private bool ValidateExpansion(int baseScore, int anchorFragIdx, int anchorWordIdx, int expansionDepth = -1)
         {
-            if (ExpamsionDepht < 0)
-                ExpamsionDepht = Config.ExpansionDepth;
+            if (expansionDepth < 0)
+                expansionDepth = Config.ExpansionDepth;
 
-            string fText = new string(GetFragmentChars(anchorFragIdx, anchorFragIdx + GetFragmentCountForLength(anchorFragIdx, ExpamsionDepht)));
-            int x = GetWordCountForLength(anchorWordIdx, ExpamsionDepht);
+            string fText = new string(GetFragmentChars(anchorFragIdx, anchorFragIdx + GetFragmentCountForLength(anchorFragIdx, expansionDepth)));
+            int x = GetWordCountForLength(anchorWordIdx, expansionDepth);
             string wText = new string(GetWordChars(anchorWordIdx, anchorWordIdx + x));
 
             int score = Fuzz.Ratio(fText, wText);
@@ -544,9 +488,6 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
             return true;
         }
 
-        // ------------------------------------------------------------
-        // Gap tracking (unchanged)
-        // ------------------------------------------------------------
         public List<WordGap> wordGaps = new List<WordGap>();
         public List<FragmentGap> fragmentGaps = new List<FragmentGap>();
 
@@ -594,9 +535,6 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
             }
         }
 
-        // ------------------------------------------------------------
-        // Micro-alignment (now uses FuzzySharp)
-        // ------------------------------------------------------------
         public void AlignMicroSegments(AlignmentJob job)
         {
             int wordIndex = job.WordStartIndex;
@@ -635,9 +573,7 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
             if (backupResult.score > 0)
             {
                 HandleBackupMatch(fragmentIndex, ref wordIndex, backupResult.index, result.wordCount);
-
                 result = MatchFragmentAtWordIndex(wordIndex, fragmentIndex, job.WordEndIndex);
-
                 ApplyMatch(fragmentIndex, wordIndex, result.wordCount);
                 wordIndex += result.wordCount;
                 return true;
@@ -701,20 +637,14 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
                 BookSegments[j].LinkedSegments.Add(matchedFragment);
         }
 
-        // ------------------------------------------------------------
-        // Try to match a single fragment against 1..N words
-        // ------------------------------------------------------------
         public (int wordCount, int score) MatchFragmentAtWordIndex(
             int startWordIndex,
             int fragmentIndex,
             int maxWordIndex)
         {
-            // Target is only the current fragment (Short Text)
             var targetChars = GetFragmentChars(fragmentIndex, fragmentIndex);
             string targetStr = new string(targetChars);
 
-            // Limit word search to a reasonable amount (e.g., 25 words)
-            // instead of character length to avoid the "mathing too much" bug.
             int wordLimit = Math.Min(maxWordIndex, startWordIndex + targetChars.Length);
 
             int bestScore = 0;
@@ -722,11 +652,9 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
 
             for (int i = 1; i <= (wordLimit - startWordIndex); i++)
             {
-                // Get words from startWordIndex to (startWordIndex + i - 1)
                 var wordChars = GetWordChars(startWordIndex, startWordIndex + i - 1);
                 int score = Fuzz.Ratio(targetStr, new string(wordChars));
 
-                // Bonus if word chunk ends with punctuation (helps align boundaries)
                 if (wordChars.Length > 0 && (wordChars[wordChars.Length - 1] == '.' || wordChars[wordChars.Length - 1] == ','))
                     score += Config.PunctuationBonusScore;
 
@@ -737,7 +665,6 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
                 }
                 else if (score < bestScore - Config.ScoreDropThresholdForEarlyExit)
                 {
-                    // If the score starts dropping significantly, we've overshot the fragment
                     break;
                 }
             }
@@ -745,9 +672,6 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
             return (bestWordCount, bestScore);
         }
 
-        // ------------------------------------------------------------
-        // Logging (adapted to char[] – simply create strings from spans)
-        // ------------------------------------------------------------
         private static readonly ConcurrentQueue<LogEntry> _logs = new ConcurrentQueue<LogEntry>();
 
         private void LogOutcome(
@@ -755,7 +679,7 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
             LogLevel level,
             string message,
             int wordPos,
-            AlingmentMapper fragmentMap,
+            AlignmentMapper fragmentMap,
             int matchedWordCount = 0)
         {
             Console.WriteLine("------------------------------------------");
@@ -779,7 +703,7 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
                 Level = level,
                 Message = message,
                 ContextSnippet = snippet,
-                MachedText = matchedText,
+                MatchedText = matchedText,
                 TargetText = targetText,
                 IsSystemMessage = true
             };
@@ -808,8 +732,10 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
             return new string(fragmentChars);
         }
     }
+}
 
-    // LogEntry definition (assumed to exist)
+namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Models
+{
     public class LogEntry
     {
         public required int FragmentIndex { get; set; }
@@ -817,11 +743,14 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
         public required LogLevel Level { get; set; }
         public string Message { get; set; } = "No Message set";
         public string ContextSnippet { get; set; } = "No Context Snippet set";
-        public string MachedText { get; set; } = "No Matched Text set";
+        public string MatchedText { get; set; } = "No Matched Text set";
         public string TargetText { get; set; } = "No Target Text set";
         public bool IsSystemMessage { get; set; } = false;
     }
+}
 
+namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Models
+{
     public enum LogLevel
     {
         Red,

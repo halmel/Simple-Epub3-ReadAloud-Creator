@@ -15,7 +15,6 @@ using System.Windows.Shapes;
 using EpubSharp;
 using System.IO;
 using Epub3MediaOverlays.Core; 
-using Epub3MediaOverlays.Core.Utilities;
 namespace Epub3MediaOverlays.Wpf
 {
     /// <summary>

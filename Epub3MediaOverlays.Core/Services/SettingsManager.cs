@@ -1,6 +1,6 @@
 using EpubSharp;
 using Microsoft.Extensions.Options;
-using Epub3MediaOverlays.Core.AlingnerUtil;
+using Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal;
 using System.IO;
 using System.Text.Json;
 
@@ -40,7 +40,7 @@ namespace Epub3MediaOverlays.Core
         public int MaxConcurrentTranscriptions { get; set; } = 1;
 
         // Aligner Configuration - stored as a nested object
-        public AlingnerConfiguration AlingnerConfig { get; set; } = new AlingnerConfiguration();
+        public AlignmentConfiguration AlingnerConfig { get; set; } = new AlignmentConfiguration();
     }
 
 

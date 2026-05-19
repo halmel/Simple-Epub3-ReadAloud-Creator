@@ -9,11 +9,14 @@
 
     xmlns:local="clr-namespace:Epub3MediaOverlays.Wpf"
         Title="Simple Epub3 ReadAloud Creator" Height="1000" Width="1200"
-        Background="#f5f5f5">
+        Background="#f5f5f5"
+        xmlns:wpf="clr-namespace:Epub3MediaOverlays.Wpf"
+xmlns:core="clr-namespace:Epub3MediaOverlays.Core;assembly=Epub3MediaOverlays.Core">
+    
     <Window.Resources>
-        <local:SafeImageConverter x:Key="SafeImageConverter"/>
-        <local:StatusToEnabledConverter x:Key="StatusToEnabledConverter"/>
-        <local:BoolToArrowConverter x:Key="BoolToArrowConverter"/>
+        <core:SafeImageConverter x:Key="SafeImageConverter"/>
+        <core:StatusToEnabledConverter x:Key="StatusToEnabledConverter"/>
+        <core:BoolToArrowConverter x:Key="BoolToArrowConverter"/>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
     </Window.Resources>
     <DockPanel>

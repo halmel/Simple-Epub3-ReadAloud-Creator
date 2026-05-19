@@ -12,9 +12,9 @@ using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
-using static Epub3MediaOverlays.Core.Models.Book;
-using static Epub3MediaOverlays.Core.Models.BookgroupList;
-using static Epub3MediaOverlays.Core.Utilities.TranscriptClass;
+using Epub3MediaOverlays.Core;
+using Epub3MediaOverlays.Core.MediaOverlayGeneration;
+using Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal;
 namespace Epub3MediaOverlays.Wpf
 {
     public partial class MainWindow : Window
@@ -529,11 +529,11 @@ namespace Epub3MediaOverlays.Wpf
 
         private async void ProcessNextInQueue()
         {
-            GenerateEpubUtil generator = new GenerateEpubUtil(new GenerateEpubUtilSettings() 
-            { 
-                TranscriptionScript = new CUDAFasterWhisperScript(_settings.TranscriberPath, FasterWhisperModel.Tiny),
-                AlingnerConfig = _settings.AlingnerConfig
-            });
+            var settings = MediaOverlayGeneratorSettings.FromAlingnerConfig(
+                new CUDAFasterWhisperScript(_settings.TranscriberPath, FasterWhisperModel.Tiny),
+                _settings.AlingnerConfig);
+            var generator = new MediaOverlayGenerator(settings);
+
             if (isProcessing || processingQueue.Count == 0)
                 return;
 

@@ -1,7 +1,8 @@
 using System.Configuration;
 using System.Data;
 using System.Windows;
-    using Microsoft.Extensions.DependencyInjection;
+using Epub3MediaOverlays.Core;
+using Microsoft.Extensions.DependencyInjection;
 using ModernWpf;
 
 namespace Epub3MediaOverlays.Wpf

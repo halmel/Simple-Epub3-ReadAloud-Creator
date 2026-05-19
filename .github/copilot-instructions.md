@@ -1,0 +1,4 @@
+# Copilot Instructions
+
+## Project Guidelines
+- Project restructuring for EPUB3 Media Overlays: Reorganized all tightly-coupled utilities under a new MediaOverlayGeneration folder with clear separation: MediaOverlayGenerator (public entry point), Internal/ (private implementation), and Models/ (public data). Classes renamed for clarity: GenerateEpubUtil→MediaOverlayGenerator, EpubUtility→EpubProcessor, AlingnerNew→AlignmentProcessor, Fragment→AudioFragment, etc. Type system enforces proper usage (internal classes inaccessible from outside). WPF integration updated to use new namespace with backward compatibility converter. Build successful, all functionality preserved.

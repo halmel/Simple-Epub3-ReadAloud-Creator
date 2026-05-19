@@ -1,3 +1,4 @@
+using Epub3MediaOverlays.Core;
 using System.Collections.ObjectModel;
 using System.Windows;
 

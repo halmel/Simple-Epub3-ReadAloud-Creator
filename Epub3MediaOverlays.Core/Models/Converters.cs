@@ -6,7 +6,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Media;
 using System.Windows;
 using static Epub3MediaOverlays.Core.Book;
-using Epub3MediaOverlays.Core.AlingnerUtil;
+using Epub3MediaOverlays.Core.MediaOverlayGeneration.Models;
 
 namespace Epub3MediaOverlays.Core
 {

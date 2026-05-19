@@ -1,23 +1,37 @@
 using HtmlAgilityPack;
 using Newtonsoft.Json;
-using Epub3MediaOverlays.Core.AlingnerUtil;
 using System.IO;
-using static Epub3MediaOverlays.Core.Utilities.EpubUtility;
-using static Epub3MediaOverlays.Core.Utilities.TranscriptClass;
-namespace Epub3MediaOverlays.Core.Utilities
+using System.Text.RegularExpressions;
+using Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal;
+using Epub3MediaOverlays.Core.MediaOverlayGeneration.Models;
+
+namespace Epub3MediaOverlays.Core.MediaOverlayGeneration
 {
-    public class GenerateEpubUtilSettings
+    /// <summary>
+    /// Main orchestrator for generating EPUB3 Media Overlays.
+    /// 
+    /// This class coordinates the entire media overlay creation workflow:
+    /// 1. Validates input EPUB and audio files
+    /// 2. Extracts text content from EPUB
+    /// 3. Generates speech-to-text transcription (or loads cached version)
+    /// 4. Aligns audio timestamps to text segments
+    /// 5. Generates SMIL synchronization files
+    /// 6. Rebuilds EPUB with media overlay integration
+    /// 
+    /// This is the main PUBLIC API - other classes in this feature are internal implementation.
+    /// </summary>
+    public class MediaOverlayGenerator
     {
-        public required ITranscriptionScript TranscriptionScript { get; set; }
-        public AlingnerConfiguration AlingnerConfig { get; set; } = new AlingnerConfiguration();
-    }
-    public class GenerateEpubUtil
-    {
-        public GenerateEpubUtilSettings Settings { get; set; }
-        public GenerateEpubUtil(GenerateEpubUtilSettings settings)
+        public MediaOverlayGeneratorSettings Settings { get; set; }
+
+        public MediaOverlayGenerator(MediaOverlayGeneratorSettings settings)
         {
             this.Settings = settings;
         }
+
+        /// <summary>
+        /// Generates an EPUB3 file with media overlays (audio synchronization).
+        /// </summary>
         public void GenerateEpub(BookData data)
         {
             // 1. Validation & Setup
@@ -30,14 +44,12 @@ namespace Epub3MediaOverlays.Core.Utilities
             Settings.TranscriptionScript.Mp3Files = data.Mp3Paths.ToArray();
             Settings.TranscriptionScript.OutputPath = data.TranscriptionJsonPath;
 
-
-
-
             // 2. Load and extract EPUB content
-            Dictionary<string, HtmlDocument> htmlDocs = LoadEpubAndExtractHtml(data.EpubPath);
-            var segments = ExtractAllTextSegments(htmlDocs);
+            Dictionary<string, HtmlDocument> htmlDocs = EpubProcessor.LoadEpubAndExtractHtml(data.EpubPath);
+            var segments = EpubProcessor.ExtractAllTextSegments(htmlDocs);
             List<WordSegment> wordSegments = SplitTextSegmentsIntoWords(segments);
             WordSegment.AssignListIndices(wordSegments);
+
             // 3. Handle Transcription (Local Cache or Python Script)
             string transcriptionRaw = "";
             if (File.Exists(data.TranscriptionJsonPath))
@@ -46,11 +58,9 @@ namespace Epub3MediaOverlays.Core.Utilities
             }
             else
             {
-
-                // Ensure the directory for the output exists
                 Directory.CreateDirectory(data.AudioPathDir);
 
-                RunTranscription(
+                TranscriptProcessor.RunTranscription(
                     Path.GetFullPath(Path.Combine(Settings.TranscriptionScript.TranscriptPath, @"venv")),
                     Settings.TranscriptionScript,
                     line => Console.WriteLine("[Transcription] " + line)
@@ -61,26 +71,32 @@ namespace Epub3MediaOverlays.Core.Utilities
             }
 
             // 4. Process Transcript
-            List<Root> transcript = JsonConvert.DeserializeObject<List<Root>>(transcriptionRaw) ?? throw new ArgumentNullException(nameof(transcriptionRaw));
+            List<TranscriptionRoot> transcript = JsonConvert.DeserializeObject<List<TranscriptionRoot>>(transcriptionRaw)
+                ?? throw new ArgumentNullException(nameof(transcriptionRaw));
             foreach (var item in transcript)
             {
                 item.LinkSegments();
             }
-            List<Fragment> audioSegments = ExtractSegmentsWithFileId(transcript);
-            Fragment.AssignListIndices(audioSegments);
+            List<AudioFragment> audioSegments = TranscriptProcessor.ExtractSegmentsWithFileId(transcript);
+            AudioFragment.AssignListIndices(audioSegments);
 
             // 5. Alignment (Local Cache or Logic)
             List<WordSegment> words;
             if (File.Exists(data.WordsJsonPath))
             {
-                words = LoadWordSegments(data.WordsJsonPath);
+                words = EpubProcessor.LoadWordSegments(data.WordsJsonPath);
             }
             else
             {
                 Console.WriteLine("Running Alignment...");
-                var aling = new AlingnerNew(ref wordSegments, ref audioSegments, data.WordsJsonPath, data.AlignmentLogPath, Settings.AlingnerConfig);
-                aling.RunAlingment();
-                words = LoadWordSegments(data.WordsJsonPath);
+                var alignment = new AlignmentProcessor(
+                    ref wordSegments,
+                    ref audioSegments,
+                    data.WordsJsonPath,
+                    data.AlignmentLogPath,
+                    Settings.AlignmentConfig);
+                alignment.RunAlignment();
+                words = EpubProcessor.LoadWordSegments(data.WordsJsonPath);
             }
 
             WordSegment.AssignListIndices(words);
@@ -96,19 +112,18 @@ namespace Epub3MediaOverlays.Core.Utilities
             string smilPath = Path.Combine(data.TempProcessingFolder, "MediaOverlays");
             Directory.CreateDirectory(smilPath);
 
-            NormalizeSegmentsToFullMp3Length(words);
+            EpubProcessor.NormalizeSegmentsToFullMp3Length(words);
             SmilGenerator.GenerateSmilFiles(words, smilPath);
 
             // 7. Final Rebuild
-            List<HtmlTextSegment> recombinedSegments = RecombineWordsIntoTextSegments(words);
-            ApplyTextSegmentsToHtmlDocuments(htmlDocs, recombinedSegments);
+            List<HtmlTextSegment> recombinedSegments = EpubProcessor.RecombineWordsIntoTextSegments(words);
+            EpubProcessor.ApplyTextSegmentsToHtmlDocuments(htmlDocs, recombinedSegments);
 
-            var smilFiles = GetAllFilesOfType(smilPath, ".smil");
+            var smilFiles = EpubProcessor.GetAllFilesOfType(smilPath, ".smil");
 
-            // Ensure the global ProcessedBooks folder exists before saving
             Directory.CreateDirectory(data.GlobalProcessedFolder);
 
-            RebuildEpubWithMedia(
+            EpubProcessor.RebuildEpubWithMedia(
                 data.EpubPath,
                 htmlDocs,
                 smilFiles,
@@ -119,73 +134,39 @@ namespace Epub3MediaOverlays.Core.Utilities
             Console.WriteLine("EPUB Generation Complete: " + data.FinalEpubOutputPath);
         }
 
-
-
-
-        public static Dictionary<string, string> ForceUpdateOuterHtml(Dictionary<string, HtmlDocument> htmlDocuments)
+        /// <summary>
+        /// Splits text segments into individual words.
+        /// </summary>
+        private static List<WordSegment> SplitTextSegmentsIntoWords(List<HtmlTextSegment> segments)
         {
-            var updatedHtmls = new Dictionary<string, string>();
+            var wordSegments = new List<WordSegment>();
+            var wordRegex = new Regex(@"(\w+|\s+|[^\w\s]+)", RegexOptions.Compiled);
 
-            foreach (var kvp in htmlDocuments)
+            foreach (var segment in segments)
             {
-                string key = kvp.Key;
-                HtmlDocument doc = kvp.Value;
+                string text = segment.EditedText ?? segment.OriginalText;
+                var matches = wordRegex.Matches(text);
 
-                using (var stringWriter = new StringWriter())
+                for (int i = 0; i < matches.Count; i++)
                 {
-                    // Force-save the document to refresh the underlying HTML structure
-                    doc.Save(stringWriter);
-                    string updatedHtml = stringWriter.ToString();
-
-                    // Store the forcibly updated OuterHtml
-                    updatedHtmls[key] = updatedHtml;
+                    wordSegments.Add(new WordSegment
+                    {
+                        FileName = segment.FileName,
+                        ParentXPath = segment.ParentXPath,
+                        TextNodeIndex = segment.TextNodeIndex,
+                        Word = matches[i].Value,
+                        WordIndexInSegment = i,
+                    });
                 }
             }
 
-            return updatedHtmls;
+            return wordSegments;
         }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-        public static List<string> GetAllFilesOfType(string folderPath, string extension)
-        {
-            if (!Directory.Exists(folderPath))
-                throw new DirectoryNotFoundException($"Folder not found: {folderPath}");
-
-            // Normalize the extension (e.g., ".mp3")
-            if (!extension.StartsWith("."))
-                extension = "." + extension;
-
-            return new List<string>(
-                Directory.GetFiles(folderPath, "*" + extension, SearchOption.AllDirectories)
-            );
-        }
-
-
-        public static void AssignSentenceIndices(List<WordSegment> words, Dictionary<string, HtmlDocument> DocDict)
+        /// <summary>
+        /// Assigns sentence indices to word segments based on HTML structure and audio links.
+        /// </summary>
+        private static void AssignSentenceIndices(List<WordSegment> words, Dictionary<string, HtmlDocument> DocDict)
         {
             var sortedWords = words.OrderBy(w => w.IndexInList).ToList();
             int globalSentenceCounter = 0;
@@ -194,9 +175,6 @@ namespace Epub3MediaOverlays.Core.Utilities
 
             foreach (var fileGroup in byFile)
             {
-                string fileName = fileGroup.Key;
-
-                // Group by segment group (based on linked segments)
                 var bySegmentGroup = fileGroup
                     .GroupBy(w => string.Join(",", w.LinkedSegments.Select(s => $"{s.FileId}_seg-{s.IndexInList}")))
                     .ToList();
@@ -216,14 +194,11 @@ namespace Epub3MediaOverlays.Core.Utilities
 
                         if (word.ParentXPath != currentParentXPath)
                         {
-                            // Determine if the current word's parent is fully contained in the previous
                             if (!IsFullyContainedSegment(word.ParentXPath, currentParentXPath, wordList))
                             {
-                                // Not fully contained → start new sentence
                                 sentenceIndex++;
                                 currentParentXPath = word.ParentXPath;
                             }
-                            // else → continue with the current sentenceIndex
                         }
 
                         word.SentenceIndex = sentenceIndex;
@@ -236,7 +211,6 @@ namespace Epub3MediaOverlays.Core.Utilities
 
         private static bool IsFullyContainedSegment(string childXPath, string parentXPath, List<WordSegment> wordList)
         {
-            // Get all words for the child XPath
             var childWords = wordList
                 .Where(w => w.ParentXPath == childXPath)
                 .OrderBy(w => w.IndexInList)
@@ -259,30 +233,25 @@ namespace Epub3MediaOverlays.Core.Utilities
             return childStart >= parentStart && childEnd <= parentEnd;
         }
 
-
-        public static void TagWordsWithSmilSpans(List<WordSegment> words)
+        /// <summary>
+        /// Tags words with SMIL span IDs for synchronization.
+        /// </summary>
+        private static void TagWordsWithSmilSpans(List<WordSegment> words)
         {
-            // Group by file first
             var byFile = words.GroupBy(w => w.FileName);
-
-            // This counter must start at 0 and increment exactly 
-            // the same way as the SmilGenerator to ensure IDs match.
             int globalSyncCounter = 0;
 
             foreach (var fileGroup in byFile)
             {
-                // 1. Group by the unique audio segment (matching SmilGenerator logic)
                 var bySegmentGroup = fileGroup
                     .GroupBy(w => string.Join(";", w.LinkedSegments.Select(s => $"{s.FileId}_{s.IndexInList}")))
                     .ToList();
 
                 foreach (var segmentGroup in bySegmentGroup)
                 {
-                    // Skip words that aren't linked to audio
                     if (segmentGroup.All(w => w.LinkedSegments == null || w.LinkedSegments.Count == 0))
                         continue;
 
-                    // 2. Group by sentence index within this segment
                     var bySentence = segmentGroup
                         .GroupBy(w => w.SentenceIndex)
                         .OrderBy(g => g.Key)
@@ -296,15 +265,11 @@ namespace Epub3MediaOverlays.Core.Utilities
                         var first = sentenceWords.First();
                         var last = sentenceWords.Last();
 
-                        // 3. Apply the simplified naming scheme
-                        // ID format: id-sentence0, id-sentence1, etc.
                         string spanId = $"id-sentence{globalSyncCounter}";
 
-                        // Inject the span tags into the Word strings
                         first.Word = $"<span id=\"{spanId}\">{first.Word}";
                         last.Word += "</span>";
 
-                        // 4. Increment the counter for every sync unit (sentence group)
                         globalSyncCounter++;
                     }
                 }
@@ -312,113 +277,33 @@ namespace Epub3MediaOverlays.Core.Utilities
 
             Console.WriteLine($"[OK] Tagged {globalSyncCounter} spans across all files.");
         }
-    
-        
 
-
-
-
-
-
-
-
-
-        public class AudioLinkGap
-        {
-            public int StartSegmentIndex { get; set; }
-            public int EndSegmentIndex { get; set; }
-            public List<WordSegment> AffectedWords { get; set; } = new();
-            public bool IsGap { get; set; }
-
-        }
-        public static void FillSegmentGaps(ref List<WordSegment> words, List<Fragment> segments, List<AudioLinkGap> gaps)
-        {
-            foreach (var gap in gaps)
-            {
-                if (gap.StartSegmentIndex == -1 || gap.EndSegmentIndex == -1)
-                    continue;
-
-                if (gap.EndSegmentIndex < gap.StartSegmentIndex)
-                {
-                    Console.WriteLine($"[Error] Invalid segment index range: {gap.StartSegmentIndex} to {gap.EndSegmentIndex}");
-                    continue;
-                }
-
-                // 1. Get all segments physically located between the start and end of the gap
-                var inBetweenSegments = segments
-                    .Where(s => s.IndexInList >= gap.StartSegmentIndex + 1 && s.IndexInList <= gap.EndSegmentIndex - 1)
-                    .ToList();
-
-                // Case A: No segments found between the gap indices
-                if (inBetweenSegments.Count == 0)
-                {
-                    var fallbackSegment = segments[gap.StartSegmentIndex];
-                    foreach (var item in gap.AffectedWords)
-                    {
-                        // Ensure we don't mix FileIds if the word already had segments
-                        if (item.LinkedSegments.Count > 0 && item.LinkedSegments[0].FileId != fallbackSegment.FileId)
-                        {
-                            // If FileId differs, we overwrite to maintain consistency
-                            item.LinkedSegments = new List<Fragment> { fallbackSegment };
-                        }
-                        else if (!item.LinkedSegments.Any(s => s.IndexInList == fallbackSegment.IndexInList))
-                        {
-                            item.LinkedSegments.Add(fallbackSegment);
-                        }
-
-                        words[item.IndexInList].LinkedSegments = item.LinkedSegments;
-                    }
-                    continue;
-                }
-
-                // Case B: Segments exist in the gap. 
-                // We must group them by FileId to satisfy the requirement that a word 
-                // only links to segments with the same FileId.
-                var segmentsByFile = inBetweenSegments.GroupBy(s => s.FileId).ToList();
-
-                // We take the first group of segments (the first FileId encountered)
-                // This ensures the list assigned to the word is homogeneous.
-                var validFileGroup = segmentsByFile.First().ToList();
-
-                foreach (var word in gap.AffectedWords)
-                {
-                    // Assign the homogeneous list to the word
-                    word.LinkedSegments = new List<Fragment>(validFileGroup);
-
-                    // Sync with the main list
-                    words[word.IndexInList].LinkedSegments = word.LinkedSegments;
-                }
-            }
-        }
-
-
-
-
-        public static List<AudioLinkGap> CollectAudioLinkGaps(List<WordSegment> words)
+        /// <summary>
+        /// Collects gaps in audio link coverage where words lack corresponding audio fragments.
+        /// </summary>
+        private static List<AudioLinkGap> CollectAudioLinkGaps(List<WordSegment> words)
         {
             var gaps = new List<AudioLinkGap>();
             AudioLinkGap? currentGap = null;
 
-            int previousIndex = -1;   // -1 = no previous segment
+            int previousIndex = -1;
             bool hasPrevious = false;
 
             foreach (var word in words)
             {
                 bool hasSegment = TryGetFirstSegmentIndex(word, out int currentIndex);
-
                 bool isGap = hasPrevious && hasSegment && (currentIndex - previousIndex > 1);
 
                 if (!hasSegment || isGap)
                 {
                     currentGap ??= new AudioLinkGap
-                        {
-                            StartSegmentIndex = hasPrevious ? previousIndex : -1,
-                            IsGap = isGap
-                        };
+                    {
+                        StartSegmentIndex = hasPrevious ? previousIndex : -1,
+                        IsGap = isGap
+                    };
 
                     currentGap.AffectedWords.Add(word);
 
-                    // close immediately on jump
                     if (isGap && hasSegment)
                     {
                         currentGap.EndSegmentIndex = currentIndex;
@@ -443,6 +328,55 @@ namespace Epub3MediaOverlays.Core.Utilities
             return gaps;
         }
 
+        /// <summary>
+        /// Fills gaps in audio links by assigning nearby audio fragments to unlinked words.
+        /// </summary>
+        private static void FillSegmentGaps(ref List<WordSegment> words, List<AudioFragment> segments, List<AudioLinkGap> gaps)
+        {
+            foreach (var gap in gaps)
+            {
+                if (gap.StartSegmentIndex == -1 || gap.EndSegmentIndex == -1)
+                    continue;
+
+                if (gap.EndSegmentIndex < gap.StartSegmentIndex)
+                {
+                    Console.WriteLine($"[Error] Invalid segment index range: {gap.StartSegmentIndex} to {gap.EndSegmentIndex}");
+                    continue;
+                }
+
+                var inBetweenSegments = segments
+                    .Where(s => s.IndexInList >= gap.StartSegmentIndex + 1 && s.IndexInList <= gap.EndSegmentIndex - 1)
+                    .ToList();
+
+                if (inBetweenSegments.Count == 0)
+                {
+                    var fallbackSegment = segments[gap.StartSegmentIndex];
+                    foreach (var item in gap.AffectedWords)
+                    {
+                        if (item.LinkedSegments.Count > 0 && item.LinkedSegments[0].FileId != fallbackSegment.FileId)
+                        {
+                            item.LinkedSegments = new List<AudioFragment> { fallbackSegment };
+                        }
+                        else if (!item.LinkedSegments.Any(s => s.IndexInList == fallbackSegment.IndexInList))
+                        {
+                        }
+
+                        words[item.IndexInList].LinkedSegments = item.LinkedSegments;
+                    }
+                    continue;
+                }
+
+                var segmentsByFile = inBetweenSegments.GroupBy(s => s.FileId).ToList();
+                var validFileGroup = segmentsByFile.First().ToList();
+
+                foreach (var word in gap.AffectedWords)
+                {
+                    word.LinkedSegments = new List<AudioFragment>(validFileGroup);
+                    words[word.IndexInList].LinkedSegments = word.LinkedSegments;
+                }
+            }
+        }
+
         private static bool TryGetFirstSegmentIndex(WordSegment word, out int index)
         {
             if (word.LinkedSegments != null && word.LinkedSegments.Count > 0)
@@ -454,10 +388,5 @@ namespace Epub3MediaOverlays.Core.Utilities
             index = default;
             return false;
         }
-
-
-
     }
 }
-
-

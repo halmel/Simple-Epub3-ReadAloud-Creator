@@ -2,16 +2,17 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Xml;
 using System.Xml.Serialization;
-using static Epub3MediaOverlays.Core.Utilities.EpubUtility;
-using static Epub3MediaOverlays.Core.AlingnerUtil.EpubSmilLib;
+using Epub3MediaOverlays.Core.MediaOverlayGeneration.Models;
 
-namespace Epub3MediaOverlays.Core.AlingnerUtil
+namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
 {
-    public static class EpubSmilLib
+    /// <summary>
+    /// Internal SMIL (Synchronized Multimedia Integration Language) file generation.
+    /// Creates SMIL files for EPUB media overlay synchronization.
+    /// </summary>
+    public static class SmilGenerator
     {
         [XmlRoot("smil", Namespace = "http://www.w3.org/ns/SMIL")]
         public class SmilDocument
@@ -28,7 +29,6 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
             [XmlElement("body")]
             public SmilBody Body { get; set; }
 
-            // Helper to handle the epub namespace prefix during serialization
             [XmlNamespaceDeclarations]
             public XmlSerializerNamespaces Namespaces;
 
@@ -38,8 +38,6 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
                 Namespaces.Add("epub", "http://www.idpf.org/2007/ops");
                 Body = new SmilBody();
             }
-
-            #region IO Functions
 
             public static SmilDocument Load(string filePath)
             {
@@ -59,13 +57,11 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
                     serializer.Serialize(writer, this, Namespaces);
                 }
             }
-
-            #endregion
         }
 
         public class SmilHead
         {
-            [XmlAnyElement] // Allows any custom metadata as per spec
+            [XmlAnyElement]
             public XmlElement[] Metadata { get; set; }
         }
 
@@ -139,21 +135,21 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
             [XmlAttribute("clipEnd")]
             public string ClipEnd { get; set; }
         }
-    }
-    public static class SmilGenerator
-    {
+
+        /// <summary>
+        /// Generates SMIL files for each HTML file with audio synchronization.
+        /// </summary>
         public static void GenerateSmilFiles(List<WordSegment> words, string outputDirectory = "output")
         {
             string audioFolder = "../Audio/";
             Directory.CreateDirectory(outputDirectory);
 
-            // 1. Cleanup old files
+            // Cleanup old files
             foreach (var oldSmilFile in Directory.GetFiles(outputDirectory, "overlay_*.smil"))
             {
-                try { File.Delete(oldSmilFile); } catch { /* log error */ }
+                try { File.Delete(oldSmilFile); } catch { }
             }
 
-            // 2. Group by HTML file
             var groupedByFile = words
                 .Where(w => w.LinkedSegments?.Count > 0)
                 .GroupBy(w => w.FileName);
@@ -229,8 +225,6 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
                             clipEnd = clipBegin + totalAvailableSpan * (groupChars / totalChars);
                         }
 
-                        // --- VALIDATION & DEBUG BREAKPOINT ---
-                        // Check if the FileId is missing or if the duration is zero/invalid
                         if (string.IsNullOrWhiteSpace(firstSeg.FileId) || clipEnd < clipBegin)
                         {
                             Console.WriteLine("!!! DEBUG BREAKPOINT: Empty or Invalid Entry Detected !!!");
@@ -238,11 +232,7 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
                             Console.WriteLine($"File: {fileName}");
                             Console.WriteLine($"Audio Src: {audioSrc}");
                             Console.WriteLine($"Timing: {clipBegin} to {clipEnd}");
-
-                            //throw new InvalidDataException($"Attempted to generate an empty SMIL entry at sentence{globalSyncCounter}. " +
-                            //    "Verify that LinkedSegments contains valid FileIds and non-zero durations.");
                         }
-                        // -------------------------------------
 
                         var par = new SmilPar
                         {
@@ -272,28 +262,25 @@ namespace Epub3MediaOverlays.Core.AlingnerUtil
             }
         }
 
-private static void AddTotalLengthCommentToSmil(string smilPath, double totalSeconds)
-{
-    string content = File.ReadAllText(smilPath);
-    string totalLengthComment = $"<!-- TotalLength: {totalSeconds.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)} -->";
+        private static void AddTotalLengthCommentToSmil(string smilPath, double totalSeconds)
+        {
+            string content = File.ReadAllText(smilPath);
+            string totalLengthComment = $"<!-- TotalLength: {totalSeconds.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)} -->";
 
-    // Locate the end of the XML declaration
-    int xmlDeclarationEnd = content.IndexOf("?>");
+            int xmlDeclarationEnd = content.IndexOf("?>");
 
-    if (xmlDeclarationEnd != -1)
-    {
-        // Insert the comment after the "?>" characters
-        int insertPos = xmlDeclarationEnd + 2;
-        string newContent = content.Insert(insertPos, Environment.NewLine + totalLengthComment);
-        File.WriteAllText(smilPath, newContent);
-    }
-    else
-    {
-        // Fallback: If no XML declaration is found, prepend to the start of the file
-        string newContent = totalLengthComment + Environment.NewLine + content;
-        File.WriteAllText(smilPath, newContent);
-    }
-}
+            if (xmlDeclarationEnd != -1)
+            {
+                int insertPos = xmlDeclarationEnd + 2;
+                string newContent = content.Insert(insertPos, Environment.NewLine + totalLengthComment);
+                File.WriteAllText(smilPath, newContent);
+            }
+            else
+            {
+                string newContent = totalLengthComment + Environment.NewLine + content;
+                File.WriteAllText(smilPath, newContent);
+            }
+        }
 
         private static string FormatTime(double seconds)
         {
@@ -301,5 +288,3 @@ private static void AddTotalLengthCommentToSmil(string smilPath, double totalSec
         }
     }
 }
-
-

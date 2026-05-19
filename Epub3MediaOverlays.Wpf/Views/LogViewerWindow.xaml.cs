@@ -1,10 +1,10 @@
+using Epub3MediaOverlays.Core.MediaOverlayGeneration.Models;
 using Newtonsoft.Json;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Windows;
-using static Epub3MediaOverlays.Core.Utilities.AlingnerOld;
-
+using Epub3MediaOverlays.Core;
 namespace Epub3MediaOverlays.Wpf
 {
     public partial class LogViewerWindow : Window
@@ -58,6 +58,9 @@ namespace Epub3MediaOverlays.Wpf
             {
                 finalLogs.Insert(0, new LogEntry
                 {
+                    FragmentIndex = -1,
+                    StartPos = -1,
+                    Level = LogLevel.Green,
                     Message = $"Hidden success logs: {skippedCount}",
                     IsSystemMessage = true
                 });
