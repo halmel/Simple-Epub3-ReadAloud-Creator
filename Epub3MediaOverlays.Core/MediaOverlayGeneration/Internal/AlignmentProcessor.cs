@@ -640,7 +640,7 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
                         //implement here 
                         //the next step of processing is to get the faild fragment and tray to find it any where later within the micro job using the same fuction as the anchor algorithem, if its found then mark  the gap with all the skipped words.
                         // if not found  add frgment into the gaps, skip this fragment and cotinue 
-                       
+
                          }
                 }
 
@@ -704,7 +704,7 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
                 fragmentIndex, 
                 wordIndex, 
                 job.WordEndIndex, 
-                Config.BackupScoreRequirement);
+                Config.BackupScoreRequirement-20);
 
             if (searchResult.score >= Config.BackupScoreRequirement && searchResult.bestWord > wordIndex)
             {
@@ -730,7 +730,8 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
                 // Now try to match the fragment at the found position
                 result = MatchFragmentAtWordIndex(wordIndex, fragmentIndex, job.WordEndIndex);
                 
-                if (result.wordCount > 0)
+                // Only accept the match if the score is above the minimum threshold
+                if (result.wordCount > 0 && result.score >= Config.BackupScoreRequirement)
                 {
                     ApplyMatch(fragmentIndex, wordIndex, result.wordCount);
                     wordIndex += result.wordCount;
@@ -738,7 +739,7 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
                 }
                 else
                 {
-                    // Even at the found position, we couldn't match - mark as failed fragment gap
+                    // The match score is too low or no match found - mark as failed fragment gap
                     HandleFailedFragment(fragmentIndex, wordIndex);
                     return false;
                 }
@@ -811,20 +812,6 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
             }
         }
 
-        private void HandleBackupMatch(int fragmentIndex, ref int wordIndex, int newIndex, int originalWordCount)
-        {
-            if (newIndex - wordIndex < Config.BackupGapTolerance)
-            {
-                LogOutcome(fragmentIndex, LogLevel.Green, "Backup match close enough to apply directly", newIndex, FragmentsMap[fragmentIndex], originalWordCount);
-            }
-            else
-            {
-                AddAndMergeWordGap(wordIndex, newIndex);
-                LogOutcome(fragmentIndex, LogLevel.Yellow, $"Backup match found but with a gap. Marking word gap from {wordIndex} to {newIndex}", newIndex, FragmentsMap[fragmentIndex], originalWordCount);
-            }
-
-            wordIndex = newIndex;
-        }
 
         private void HandleStandardAlignment(int fragmentIndex, ref int wordIndex, (int wordCount, int score) result, AlignmentLogNode logNode)
         {
