@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.Json;
 using Epub3MediaOverlays.Core.MediaOverlayGeneration.Models;
 using Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal;
+using Epub3MediaOverlays.Core.MediaOverlayGeneration;
 
 namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
 {
@@ -24,6 +25,14 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
         public List<WordSegment> BookSegments { get; set; }
         public List<AudioFragment> TranscriptSegments { get; set; }
 
+        // Debug breakpoint configuration
+        public int? DebugBreakOnFragmentIndex { get; set; } = 225;
+        public int? DebugBreakOnWordIndex { get; set; }
+        public List<int> DebugBreakOnFragmentIndices { get; set; } = new List<int>();
+        public List<int> DebugBreakOnWordIndices { get; set; } = new List<int>();
+        public (int Start, int End)? DebugBreakOnFragmentRange { get; set; }
+        public (int Start, int End)? DebugBreakOnWordRange { get; set; }
+
         public char[] words { get; }
         public AlignmentMapper[] WordsMap { get; set; }
         public AlignmentMapper[] WordsSentences { get; set; }
@@ -31,10 +40,14 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
         public char[] fragments { get; }
         public AlignmentMapper[] FragmentsMap { get; set; }
 
+        private IAlignmentLogger _logger;
+        private AlignmentLogNode _currentLogNode;
+
         public AlignmentProcessor(ref List<WordSegment> bookSegments,
                                    ref List<AudioFragment> transcriptSegments,
                                    string wordPath, string logPath,
-                                   AlignmentConfiguration config = null)
+                                   AlignmentConfiguration config = null,
+                                   IAlignmentLogger logger = null)
         {
             WordPath = wordPath;
             LogPath = logPath;
@@ -42,6 +55,7 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
             Config = config ?? new AlignmentConfiguration();
             BookSegments = bookSegments;
             TranscriptSegments = transcriptSegments;
+            _logger = logger ?? new AlignmentLogger();
 
             WordsMap = new AlignmentMapper[BookSegments.Count];
             for (int i = 0; i < BookSegments.Count; i++)
@@ -55,6 +69,11 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
 
             fragments = BuildCharArray(TranscriptSegments, FragmentsMap, s => s.NormalizedText);
             WordsSentences = BuildSentenceMapFromWords();
+
+            // Initialize the logger with original text representations
+            string originalWordText = new string(words);
+            string originalFragmentText = new string(fragments);
+            _logger.Initialize(0, BookSegments.Count - 1, 0, TranscriptSegments.Count - 1, originalWordText, originalFragmentText);
         }
 
         public class AlignmentMapper
@@ -247,6 +266,9 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
             public int FragmentStartIndex { get; set; }
             public int FragmentEndIndex { get; set; }
             public int FragmentCount => FragmentEndIndex - FragmentStartIndex;
+
+            /// <summary>Reference to the log node representing this job in the tree.</summary>
+            public AlignmentLogNode LogNode { get; set; }
         }
 
         public void RunAlignment()
@@ -257,6 +279,7 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
             {
                 Console.WriteLine(jobQueue.Count);
                 var currentJob = jobQueue.Pop();
+                _currentLogNode = currentJob.LogNode;
 
                 if (IsMicroJob(currentJob))
                 {
@@ -270,10 +293,6 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
             FinalizeAlignment();
         }
 
-        /// <summary>
-        /// Alias for backward compatibility with existing code that calls RunAlingment.
-        /// </summary>
-        public void RunAlingment() => RunAlignment();
 
         private Stack<AlignmentJob> InitializeJobQueue()
         {
@@ -284,6 +303,10 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
                 FragmentStartIndex = 0,
                 FragmentEndIndex = TranscriptSegments.Count - 1
             };
+
+            // Create the root log node
+            rootJob.LogNode = _logger.CreateSubJob(rootJob.WordStartIndex, rootJob.WordEndIndex,
+                                                   rootJob.FragmentStartIndex, rootJob.FragmentEndIndex);
 
             var jobQueue = new Stack<AlignmentJob>();
             jobQueue.Push(rootJob);
@@ -305,6 +328,16 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
                 return;
             }
 
+            // Mark this job as split in the log
+            _logger.LogSplit(currentJob.LogNode);
+
+            // Create log nodes for the sub-jobs
+            foreach (var subJob in subJobs)
+            {
+                subJob.LogNode = _logger.CreateSubJob(subJob.WordStartIndex, subJob.WordEndIndex,
+                                                      subJob.FragmentStartIndex, subJob.FragmentEndIndex);
+            }
+
             PushJobsInReverse(jobQueue, subJobs);
         }
 
@@ -318,8 +351,11 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
         {
             EpubProcessor.SaveWordSegments(BookSegments, WordPath);
 
+            // Finalize the alignment log tree
+            var logTree = _logger.Finalize();
+
             var options = new JsonSerializerOptions { WriteIndented = true };
-            string json = JsonSerializer.Serialize(_logs, options);
+            string json = JsonSerializer.Serialize(logTree, options);
 
             if (File.Exists(LogPath))
                 File.Delete(LogPath);
@@ -491,16 +527,59 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
         public List<WordGap> wordGaps = new List<WordGap>();
         public List<FragmentGap> fragmentGaps = new List<FragmentGap>();
 
-        public class WordGap
+        /// <summary>
+        /// Creates a new log node for a job and sets it as the current context.
+        /// </summary>
+        private AlignmentLogNode CreateLogNodeForJob(AlignmentJob job)
         {
-            public int StartWordIndex;
-            public int EndWordIndex;
+            var node = _logger.CreateSubJob(job.WordStartIndex, job.WordEndIndex,
+                                            job.FragmentStartIndex, job.FragmentEndIndex);
+            _currentLogNode = node;
+            return node;
         }
 
-        public class FragmentGap
+        /// <summary>
+        /// Marks the current log node as split (recursive decomposition).
+        /// </summary>
+        private void LogJobSplit()
         {
-            public int StartFragmentIndex;
-            public int EndFragmentIndex;
+            if (_currentLogNode != null)
+            {
+                _logger.LogSplit(_currentLogNode);
+            }
+        }
+
+        /// <summary>
+        /// Marks the current log node as successfully aligned.
+        /// </summary>
+        private void LogJobSuccess()
+        {
+            if (_currentLogNode != null)
+            {
+                _logger.LogSuccess(_currentLogNode);
+            }
+        }
+
+        /// <summary>
+        /// Marks the current log node as partially aligned with gaps.
+        /// </summary>
+        private void LogJobPartial(List<WordGap> wordGaps, List<FragmentGap> fragmentGaps)
+        {
+            if (_currentLogNode != null)
+            {
+                _logger.LogPartial(_currentLogNode, wordGaps, fragmentGaps);
+            }
+        }
+
+        /// <summary>
+        /// Marks the current log node as failed.
+        /// </summary>
+        private void LogJobFailed(string errorMessage)
+        {
+            if (_currentLogNode != null)
+            {
+                _logger.LogFailed(_currentLogNode, errorMessage);
+            }
         }
 
         public void AddAndMergeWordGap(int start, int end)
@@ -538,19 +617,79 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
         public void AlignMicroSegments(AlignmentJob job)
         {
             int wordIndex = job.WordStartIndex;
+            var jobWordGaps = new List<WordGap>();
+            var jobFragmentGaps = new List<FragmentGap>();
 
             for (int i = job.FragmentStartIndex; i < job.FragmentEndIndex; i++)
             {
+                // Check for debug breakpoint before processing each fragment
+                CheckDebugBreakpoint(i, wordIndex);
+
                 var result = MatchFragmentAtWordIndex(wordIndex, i, job.WordEndIndex);
 
                 if (ShouldUseBackupStrategy(result, i))
                 {
                     if (TryHandleBackup(ref wordIndex, i, job, ref result))
+                    {
+                        // Log fragment result for backup match
+                        LogFragmentAlignment(job.LogNode, i, wordIndex, result.wordCount, result.score, AlignmentStatus.Success);
                         continue;
+                    }
+                    else
+                    {
+                        //implement here 
+                        //the next step of processing is to get the faild fragment and tray to find it any where later within the micro job using the same fuction as the anchor algorithem, if its found then mark  the gap with all the skipped words.
+                        // if not found  add frgment into the gaps, skip this fragment and cotinue 
+                       
+                         }
                 }
 
-                HandleStandardAlignment(i, ref wordIndex, result);
+                HandleStandardAlignment(i, ref wordIndex, result, job.LogNode);
             }
+
+            // Check for any remaining unmatched words at the end of the micro job and mark them as gaps
+            if (wordIndex < job.WordEndIndex)
+            {
+                AddAndMergeWordGap(wordIndex, job.WordEndIndex);
+                LogOutcome(
+                    fragmentIndex: job.FragmentEndIndex - 1,
+                    level: LogLevel.Yellow,
+                    message: $"Remaining unmatched words at end of micro job. Marking word gap from {wordIndex} to {job.WordEndIndex}",
+                    wordPos: wordIndex,
+                    fragmentMap: null,
+                    matchedWordCount: 0);
+                
+                // Log the remaining unmatched words as a gap entry with Gap status
+                var remainingWordsText = wordIndex < WordsMap.Length 
+                    ? new string(GetWordChars(wordIndex, job.WordEndIndex)) 
+                    : "";
+                
+                LogFragmentAlignment(
+                    job.LogNode,
+                    job.FragmentEndIndex - 1,
+                    wordIndex,
+                    job.WordEndIndex - wordIndex,
+                    0,
+                    AlignmentStatus.Gap,
+                    $"Word gap - {job.WordEndIndex - wordIndex} unmatched words at end: \"{remainingWordsText}\"",
+                    isEmptyFragment: false);
+            }
+
+            // Finalize job status based on gaps created
+            if (wordGaps.Count > 0 || fragmentGaps.Count > 0)
+            {
+                jobWordGaps.AddRange(wordGaps);
+                jobFragmentGaps.AddRange(fragmentGaps);
+                _logger.LogPartial(job.LogNode, jobWordGaps, jobFragmentGaps);
+            }
+            else
+            {
+                _logger.LogSuccess(job.LogNode);
+            }
+
+            // Clear local gap tracking for next job
+            wordGaps.Clear();
+            fragmentGaps.Clear();
         }
 
         private bool ShouldUseBackupStrategy((int wordCount, int score) result, int fragmentIndex)
@@ -560,32 +699,116 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
 
         private bool TryHandleBackup(ref int wordIndex, int fragmentIndex, AlignmentJob job, ref (int wordCount, int score) result)
         {
-            (int index, int score) backupResult = (0, 0);
+            // First, try to find the failed fragment later within the micro job using the anchor algorithm
+            var searchResult = FindFragmentSequenceMatchInWordRange(
+                fragmentIndex, 
+                wordIndex, 
+                job.WordEndIndex, 
+                Config.BackupScoreRequirement);
 
-            var test = FindFragmentSequenceMatchInWordRange(fragmentIndex, wordIndex, job.WordEndIndex, Config.BackupScoreRequirement);
-            if (test.score > Config.BackupScoreRequirement)
-                backupResult = (test.bestWord, Config.BackupResultDummyScore);
+            if (searchResult.score >= Config.BackupScoreRequirement && searchResult.bestWord > wordIndex)
+            {
+                // Found the fragment later in the micro job - mark the skipped words as a gap
+                int foundWordIndex = searchResult.bestWord;
+                
+                if (foundWordIndex > wordIndex)
+                {
+                    // Mark all skipped words as a gap
+                    AddAndMergeWordGap(wordIndex, foundWordIndex);
+                    LogOutcome(
+                        fragmentIndex, 
+                        LogLevel.Yellow, 
+                        $"Fragment found later at word {foundWordIndex}. Marking word gap from {wordIndex} to {foundWordIndex}", 
+                        foundWordIndex, 
+                        FragmentsMap[fragmentIndex], 
+                        0);
+                }
+
+                // Update wordIndex to the found position
+                wordIndex = foundWordIndex;
+                
+                // Now try to match the fragment at the found position
+                result = MatchFragmentAtWordIndex(wordIndex, fragmentIndex, job.WordEndIndex);
+                
+                if (result.wordCount > 0)
+                {
+                    ApplyMatch(fragmentIndex, wordIndex, result.wordCount);
+                    wordIndex += result.wordCount;
+                    return true;
+                }
+                else
+                {
+                    // Even at the found position, we couldn't match - mark as failed fragment gap
+                    HandleFailedFragment(fragmentIndex, wordIndex);
+                    return false;
+                }
+            }
             else
             {
+                // Could not find the fragment later in the micro job - add to fragment gaps and skip
                 HandleFailedFragment(fragmentIndex, wordIndex);
+                return false;
             }
-
-            if (backupResult.score > 0)
-            {
-                HandleBackupMatch(fragmentIndex, ref wordIndex, backupResult.index, result.wordCount);
-                result = MatchFragmentAtWordIndex(wordIndex, fragmentIndex, job.WordEndIndex);
-                ApplyMatch(fragmentIndex, wordIndex, result.wordCount);
-                wordIndex += result.wordCount;
-                return true;
-            }
-
-            return false;
         }
 
         private void HandleFailedFragment(int fragmentIndex, int wordIndex)
         {
             AddAndMergeFragmentGap(fragmentIndex, fragmentIndex);
             LogOutcome(fragmentIndex, LogLevel.Yellow, $"Failed to align fragment. Marking fragment gap at {fragmentIndex}", wordIndex, FragmentsMap[fragmentIndex], 0);
+            
+            // Log the gap as a FragmentAlignmentResult entry with Gap status
+            LogFragmentAlignment(
+                _currentLogNode, 
+                fragmentIndex, 
+                wordIndex, 
+                0, 
+                0, 
+                AlignmentStatus.Gap, 
+                "Fragment gap - could not align", 
+                isEmptyFragment: false);
+        }
+
+        /// <summary>
+        /// Logs a fragment-level alignment result for visualization in split-pane view.
+        /// </summary>
+        private void LogFragmentAlignment(
+            AlignmentLogNode logNode,
+            int fragmentIndex,
+            int wordStartIndex,
+            int wordCount,
+            int confidenceScore,
+            AlignmentStatus status,
+            string errorMessage = null,
+            bool isEmptyFragment = false)
+        {
+            try
+            {
+                var fragmentText = TranscriptSegments[fragmentIndex].NormalizedText;
+                var matchedWordsText = wordCount > 0 
+                    ? new string(GetWordChars(wordStartIndex, wordStartIndex + wordCount - 1)) 
+                    : "";
+
+                var result = new FragmentAlignmentResult
+                {
+                    FragmentIndex = fragmentIndex,
+                    WordStartIndex = wordStartIndex,
+                    WordEndIndex = wordStartIndex + wordCount - 1,
+                    ConfidenceScore = confidenceScore,
+                    Status = status,
+                    ErrorMessage = errorMessage,
+                    FragmentText = fragmentText,
+                    MatchedWordsText = matchedWordsText,
+                    HasGaps = wordGaps.Count > 0 || fragmentGaps.Count > 0,
+                    WordGapDetails = new List<WordGap>(wordGaps)
+                };
+
+                _logger.LogFragmentResult(logNode, result);
+            }
+            catch (Exception ex)
+            {
+                // Gracefully handle any errors during fragment logging
+                Console.WriteLine($"Warning: Failed to log fragment {fragmentIndex}: {ex.Message}");
+            }
         }
 
         private void HandleBackupMatch(int fragmentIndex, ref int wordIndex, int newIndex, int originalWordCount)
@@ -603,17 +826,22 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
             wordIndex = newIndex;
         }
 
-        private void HandleStandardAlignment(int fragmentIndex, ref int wordIndex, (int wordCount, int score) result)
+        private void HandleStandardAlignment(int fragmentIndex, ref int wordIndex, (int wordCount, int score) result, AlignmentLogNode logNode)
         {
             if (IsEmptyAlignment(fragmentIndex, result))
+            {
+                LogFragmentAlignment(logNode, fragmentIndex, wordIndex, 0, 0, AlignmentStatus.Success, isEmptyFragment: true);
                 return;
+            }
 
             if (result.wordCount == 0)
             {
+                LogFragmentAlignment(logNode, fragmentIndex, wordIndex, 0, 0, AlignmentStatus.Failed, "Total failure - no words matched");
                 LogOutcome(fragmentIndex, LogLevel.Red, $"Total Failure at {fragmentIndex}", wordIndex, FragmentsMap[fragmentIndex], 0);
                 return;
             }
 
+            LogFragmentAlignment(logNode, fragmentIndex, wordIndex, result.wordCount, result.score, AlignmentStatus.Success);
             LogOutcome(fragmentIndex, LogLevel.Green, $"Aligned (Score: {result.score}%)", wordIndex, FragmentsMap[fragmentIndex], result.wordCount);
             ApplyMatch(fragmentIndex, wordIndex, result.wordCount);
             wordIndex += result.wordCount;
@@ -674,6 +902,9 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
 
         private static readonly ConcurrentQueue<LogEntry> _logs = new ConcurrentQueue<LogEntry>();
 
+        /// <summary>
+        /// Logs an outcome for debugging/console output. The tree-based logger handles the structured data.
+        /// </summary>
         private void LogOutcome(
             int fragmentIndex,
             LogLevel level,
@@ -696,6 +927,7 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
             Console.WriteLine("Message:\n" + message + "\n\n\n");
             Console.WriteLine("------------------------------------------");
 
+            // Keep a reference in _logs for backward compatibility (console logging only)
             var entry = new LogEntry
             {
                 FragmentIndex = fragmentIndex,
@@ -730,6 +962,67 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
         {
             var fragmentChars = GetFragmentChars(fragmentIndex, fragmentIndex);
             return new string(fragmentChars);
+        }
+
+        /// <summary>
+        /// Checks if the current fragment and word indices match any debug breakpoint conditions.
+        /// If a match is found, triggers a debug breakpoint.
+        /// Call this method at key processing points to enable breakpoint debugging.
+        /// </summary>
+        /// <param name="fragmentIndex">The current fragment index being processed</param>
+        /// <param name="wordIndex">The current word index being processed</param>
+        [Conditional("DEBUG")]
+        public void CheckDebugBreakpoint(int fragmentIndex, int wordIndex)
+        {
+            // Check single fragment index breakpoint
+            if (DebugBreakOnFragmentIndex.HasValue && DebugBreakOnFragmentIndex.Value == fragmentIndex)
+            {
+                System.Diagnostics.Debugger.Break();
+                return;
+            }
+
+            // Check single word index breakpoint
+            if (DebugBreakOnWordIndex.HasValue && DebugBreakOnWordIndex.Value == wordIndex)
+            {
+                System.Diagnostics.Debugger.Break();
+                return;
+            }
+
+            // Check fragment indices list
+            if (DebugBreakOnFragmentIndices.Count > 0 && DebugBreakOnFragmentIndices.Contains(fragmentIndex))
+            {
+                System.Diagnostics.Debugger.Break();
+                return;
+            }
+
+            // Check word indices list
+            if (DebugBreakOnWordIndices.Count > 0 && DebugBreakOnWordIndices.Contains(wordIndex))
+            {
+                System.Diagnostics.Debugger.Break();
+                return;
+            }
+
+            // Check fragment range
+            if (DebugBreakOnFragmentRange.HasValue)
+            {
+                var range = DebugBreakOnFragmentRange.Value;
+                if (fragmentIndex >= range.Start && fragmentIndex <= range.End)
+                {
+                    System.Diagnostics.Debugger.Break();
+                    return;
+                }
+            }
+
+            // Check word range
+            if (DebugBreakOnWordRange.HasValue)
+            {
+                var range = DebugBreakOnWordRange.Value;
+                if (wordIndex >= range.Start && wordIndex <= range.End)
+                {
+                    System.Diagnostics.Debugger.Break();
+                    return;
+                }
+            }
         }
     }
 }

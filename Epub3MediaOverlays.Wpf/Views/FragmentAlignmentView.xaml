@@ -1,0 +1,101 @@
+<UserControl x:Class="Epub3MediaOverlays.Wpf.Views.FragmentAlignmentView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:local="clr-namespace:Epub3MediaOverlays.Wpf"
+             mc:Ignorable="d" 
+             d:DesignHeight="600" d:DesignWidth="1200">
+    <Grid Background="White">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header with job summary -->
+        <Border Grid.Row="0" Background="#F0F0F0" Padding="10" BorderThickness="0,0,0,1" BorderBrush="LightGray">
+            <StackPanel>
+                <TextBlock FontWeight="Bold" FontSize="12" Foreground="#333" Text="{Binding JobSummary}"/>
+                <TextBlock FontSize="10" Foreground="Gray" Margin="0,5,0,0" Text="Fragment-to-Word Alignment Pairs"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Main content: Aligned pairs (words above fragments) -->
+        <Border Grid.Row="1" Background="White" Padding="10">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <ItemsControl ItemsSource="{Binding AlignmentPairs}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel Orientation="Horizontal"
+                                       Width="{Binding RelativeSource={RelativeSource AncestorType=ScrollViewer}, Path=ViewportWidth}"/>
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <!-- Compact alignment card: 3 visible rows, details in tooltip -->
+                            <Border Background="#F7FBFF"
+                                    BorderThickness="2"
+                                    BorderBrush="{Binding BorderColor}"
+                                    CornerRadius="5"
+                                    Padding="8"
+                                    Margin="0,0,10,10"
+                                    MinWidth="180"
+                                    MaxWidth="360"
+                                    Height="140">
+                                <Border.ToolTip>
+                                    <StackPanel MaxWidth="500">
+                                        <TextBlock FontWeight="Bold" Margin="0,0,0,4">
+                                            <Run Text="Book Words: "/>
+                                            <Run Text="{Binding WordStartIndex}"/>
+                                            <Run Text="-"/>
+                                            <Run Text="{Binding WordEndIndex}"/>
+                                        </TextBlock>
+                                        <TextBlock Text="{Binding WordText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                                        <TextBlock Text="{Binding WordTooltip}" TextWrapping="Wrap" Foreground="DimGray"/>
+                                    </StackPanel>
+                                </Border.ToolTip>
+                                <StackPanel>
+                                    <!-- Row 1: mapping + status -->
+                                    <TextBlock FontSize="10" FontWeight="Bold" Foreground="#1F4E79" TextTrimming="CharacterEllipsis">
+                                        <Run Text="F"/>
+                                        <Run Text="{Binding FragmentIndex}"/>
+                                        <Run Text=" -> W"/>
+                                        <Run Text="{Binding WordStartIndex}"/>
+                                        <Run Text="-"/>
+                                        <Run Text="{Binding WordEndIndex}"/>
+                                        <Run Text=" | "/>
+                                        <Run Text="{Binding ConfidenceScore}"/>
+                                        <Run Text="% "/>
+                                        <Run Text="{Binding MatchStatus}"/>
+                                    </TextBlock>
+
+                                    <!-- Row 2: matched words (book text) -->
+                                    <Border Background="#E8F2FF" BorderBrush="#90CAF9" BorderThickness="1" CornerRadius="3" Padding="5" Margin="0,5,0,4">
+                                        <TextBlock Text="{Binding WordText}"
+                                                   FontSize="11"
+                                                   Foreground="Black"
+                                                   TextWrapping="Wrap"
+                                                   MaxHeight="36"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   ToolTip="{Binding WordTooltip}"/>
+                                    </Border>
+
+                                    <!-- Row 3: transcript fragment -->
+                                    <Border Background="{Binding BackgroundColor}" CornerRadius="3" Padding="5">
+                                        <TextBlock Text="{Binding FragmentText}"
+                                                   FontSize="11"
+                                                   Foreground="Black"
+                                                   TextWrapping="Wrap"
+                                                   MaxHeight="36"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   ToolTip="{Binding FragmentTooltip}"/>
+                                    </Border>
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </Border>
+    </Grid>
+</UserControl>

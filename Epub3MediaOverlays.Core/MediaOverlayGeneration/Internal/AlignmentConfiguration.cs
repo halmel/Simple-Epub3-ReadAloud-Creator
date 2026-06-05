@@ -17,9 +17,9 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
         public int AnchorSearchDivisor { get; set; } = 50;
 
         /// <summary>
-        /// Required quick exit score for anchor finding.
+        /// Required quick exit score for anchor finding.Unused for now.
         /// </summary>
-        public int RequiredQuickExitScore { get; set; } = 35;
+        public int RequiredQuickExitScore { get; set; } = 55;
 
         /// <summary>
         /// Minimum fuzzy match score for an anchor to be considered valid.
@@ -54,12 +54,12 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
         /// <summary>
         /// Minimum fuzzy match score threshold to pass expansion validation.
         /// </summary>
-        public int ExpansionPassScore { get; set; } = 75;
+        public int ExpansionPassScore { get; set; } = 85;
 
         /// <summary>
         /// Score threshold below which a low score warning is logged during anchor finding.
         /// </summary>
-        public int LowScoreDetectionThreshold { get; set; } = 75;
+        public int LowScoreDetectionThreshold { get; set; } = 85;
 
         /// <summary>
         /// Score validation ratio. Expanded text score must be at least baseScore * this value.
@@ -69,12 +69,12 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
         /// <summary>
         /// Score threshold for triggering backup alignment strategy.
         /// </summary>
-        public int BackupStrategyScoreThreshold { get; set; } = 60;
+        public int BackupStrategyScoreThreshold { get; set; } = 75;
 
         /// <summary>
         /// Minimum score required for a backup match to be considered successful.
         /// </summary>
-        public int BackupScoreRequirement { get; set; } = 60;
+        public int BackupScoreRequirement { get; set; } = 75;
 
         /// <summary>
         /// Dummy score assigned to backup results to indicate they should be processed.

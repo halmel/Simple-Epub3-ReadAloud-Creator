@@ -10,6 +10,10 @@
                 <ui:ThemeResources RequestedTheme="Light"/>
                 <ui:XamlControlsResources />
             </ResourceDictionary.MergedDictionaries>
+
+            <!-- Alignment Log Converters -->
+            <local:StatusToBrushConverter x:Key="StatusToBrushConverter"/>
+            <local:BoolToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
         </ResourceDictionary>
     </Application.Resources>
 </Application>
