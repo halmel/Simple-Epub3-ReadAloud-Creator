@@ -1,3 +1,7 @@
+using FuzzySharp;
+using Epub3MediaOverlays.Core.MediaOverlayGeneration;
+using Epub3MediaOverlays.Core.MediaOverlayGeneration.Models;
+
 namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
 {
     /// <summary>

@@ -160,9 +160,11 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
             string anchorStr = new string(anchorChars);
             int anchorLen = anchorChars.Length;
 
-            int bestSentenceIdx = -1;
-            int bestSentenceScore = 0;
+            // Track top N candidates for fallback validation
+            var topCandidates = new List<(int idx, int score, int firstWordIdx)>();
+            const int maxCandidates = 5;
 
+            // Fast path: sentence-level fuzzy match
             for (int s = 0; s < WordsSentences.Length; s++)
             {
                 var sentence = WordsSentences[s];
@@ -175,20 +177,107 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
                 var sentenceSpan = words.AsSpan(sentence.StartId, sentenceLength);
                 int score = Fuzz.Ratio(anchorStr, new string(sentenceSpan));
 
+                // Always track the best score, even below threshold
+                if (score > 0)
+                {
+                    // Insert into sorted list of top candidates
+                    bool inserted = false;
+                    for (int i = 0; i < topCandidates.Count; i++)
+                    {
+                        if (score > topCandidates[i].score)
+                        {
+                            topCandidates.Insert(i, (s, score, sentence.FirstWordIndex));
+                            inserted = true;
+                            break;
+                        }
+                    }
+                    if (!inserted)
+                        topCandidates.Add((s, score, sentence.FirstWordIndex));
+                    
+                    if (topCandidates.Count > maxCandidates)
+                        topCandidates.RemoveAt(topCandidates.Count - 1);
+                }
+
+                // Try validation for scores that meet threshold
                 if (score >= Config.ExpansionPassScore && ValidateExpansion(score, startFragIdx, sentence.FirstWordIndex, Config.AnchorValidationExpansionDepth))
                 {
-                    if (score > bestSentenceScore)
-                    {
-                        bestSentenceScore = score;
-                        bestSentenceIdx = s;
-                    }
+                    // Found a valid candidate - proceed with word-level search
+                    return PerformWordLevelSearch(s, score, startFragIdx, anchorStr, anchorLen, 
+                                                 wordSearchStart, wordSearchEnd, sentence);
                 }
             }
 
-            if (bestSentenceIdx == -1 || bestSentenceScore < Config.ExpansionPassScore)
-                return (-1, 0);
+            // Fallback #3: Try validating top N candidates even if they didn't pass initially
+            foreach (var candidate in topCandidates)
+            {
+                if (candidate.score >= Config.ExpansionPassScore)
+                    continue; // Already tried these above
 
-            var bestSentence = WordsSentences[bestSentenceIdx];
+                var sentence = WordsSentences[candidate.idx];
+                if (ValidateExpansion(candidate.score, startFragIdx, candidate.firstWordIdx, Config.AnchorValidationExpansionDepth))
+                {
+                    return PerformWordLevelSearch(candidate.idx, candidate.score, startFragIdx, anchorStr, anchorLen,
+                                                 wordSearchStart, wordSearchEnd, sentence);
+                }
+            }
+            int windowLength = (int)(anchorLen * Config.WindowLengthMultiplier);
+
+     
+
+            // Fallback #2: Return best sentence-level candidate even below threshold
+            if (topCandidates.Count > 0)
+            {
+                var bestCandidate = topCandidates[0];
+                var bestSentence = WordsSentences[bestCandidate.idx];
+                int searchWordStart = Math.Max(wordSearchStart, bestSentence.FirstWordIndex - Config.SearchWordRangeAdjustment);
+                int searchWordEnd = Math.Min(wordSearchEnd, bestSentence.LastWordIndex + Config.SearchWordRangeAdjustment);
+
+                int bestScore = 0;
+                int bestWord = -1;
+
+                for (int w = searchWordStart; w <= searchWordEnd; w++)
+                {
+                    int charStart = WordsMap[w].StartId;
+                    if (charStart + windowLength > words.Length) break;
+
+                    var span = words.AsSpan(charStart, windowLength);
+                    int score = Fuzz.WeightedRatio(anchorStr, new string(span));
+
+                    if (score > bestScore)
+                    {
+                        bestScore = score;
+                        bestWord = w;
+                    }
+                }
+
+                if (bestWord != -1)
+                {
+                    LogOutcome(
+                        fragmentIndex: startFragIdx,
+                        level: LogLevel.Yellow,
+                        message: $"Using best available match at word {bestWord} (Sentence {bestCandidate.idx}, score: {bestScore}%, threshold: {Config.ExpansionPassScore}%)",
+                        wordPos: bestWord,
+                        fragmentMap: FragmentsMap[startFragIdx],
+                        matchedWordCount: 0);
+                }
+
+                return (bestWord, bestScore);
+            }
+
+            // Complete failure - no match found
+            return (-1, 0);
+        }
+
+        private (int bestWord, int score) PerformWordLevelSearch(
+            int sentenceIdx,
+            int sentenceScore,
+            int startFragIdx,
+            string anchorStr,
+            int anchorLen,
+            int wordSearchStart,
+            int wordSearchEnd,
+            AlignmentMapper bestSentence)
+        {
             int searchWordStart = Math.Max(wordSearchStart, bestSentence.FirstWordIndex - Config.SearchWordRangeAdjustment);
             int searchWordEnd = Math.Min(wordSearchEnd, bestSentence.LastWordIndex + Config.SearchWordRangeAdjustment);
 
@@ -217,7 +306,7 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
                 LogOutcome(
                     fragmentIndex: startFragIdx,
                     level: LogLevel.Green,
-                    message: $"Anchor found at word {bestWord} (Sentence {bestSentenceIdx}). Long-window score: {bestScore}%.",
+                    message: $"Anchor found at word {bestWord} (Sentence {sentenceIdx}). Long-window score: {bestScore}%.",
                     wordPos: bestWord,
                     fragmentMap: FragmentsMap[startFragIdx],
                     matchedWordCount: shortMatch.wordCount);
@@ -227,6 +316,22 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
                 Console.WriteLine($"!!! LOW SCORE DETECTED at Word {bestWord} (Score: {bestScore}) !!!");
 
             return (bestWord, bestScore);
+        }
+
+        /// <summary>
+        /// Calculates an adaptive threshold based on fragment length.
+        /// Longer fragments naturally produce higher fuzzy scores, while short fragments are noisier.
+        /// </summary>
+        private int GetAdaptiveThreshold(int fragmentLength)
+        {
+            if (fragmentLength <= 5)
+                return 60;
+            else if (fragmentLength <= 15)
+                return 70;
+            else if (fragmentLength <= 40)
+                return 80;
+            else
+                return 90;
         }
 
         private bool ValidateExpansion(int baseScore, int anchorFragIdx, int anchorWordIdx, int expansionDepth = -1)
@@ -239,7 +344,12 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
             string wText = new string(GetWordChars(anchorWordIdx, anchorWordIdx + x));
 
             int score = Fuzz.Ratio(fText, wText);
-            return score >= baseScore * Config.ScoreValidationRatio;
+            
+            // Use adaptive threshold based on fragment length
+            int adaptiveThreshold = GetAdaptiveThreshold(fText.Length);
+            int effectiveThreshold = Math.Max((int)(baseScore * Config.ScoreValidationRatio), adaptiveThreshold);
+            
+            return score >= effectiveThreshold;
         }
 
         /// <summary>
@@ -458,6 +568,11 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
             return false;
         }
 
+        /// <summary>
+        /// Matches a fragment to words starting at a given index, using a "3 consecutive misses" 
+        /// early exit strategy instead of aggressive score-drop threshold. This is more tolerant
+        /// of non-monotonic score patterns where scores may dip and then recover.
+        /// </summary>
         public (int wordCount, int score) MatchFragmentAtWordIndex(
             int startWordIndex,
             int fragmentIndex,
@@ -470,6 +585,8 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
 
             int bestScore = 0;
             int bestWordCount = 0;
+            int consecutiveMisses = 0;
+            const int maxConsecutiveMisses = 3;
 
             for (int i = 1; i <= (wordLimit - startWordIndex); i++)
             {
@@ -483,11 +600,16 @@ namespace Epub3MediaOverlays.Core.MediaOverlayGeneration.Internal
                 {
                     bestScore = score;
                     bestWordCount = i;
+                    consecutiveMisses = 0; // Reset on improvement
                 }
-                else if (score < bestScore - Config.ScoreDropThresholdForEarlyExit)
+                else
                 {
-                    break;
+                    consecutiveMisses++;
                 }
+
+                // Early exit after 3 consecutive misses (scores not improving)
+                if (consecutiveMisses >= maxConsecutiveMisses)
+                    break;
             }
 
             return (bestWordCount, bestScore);
